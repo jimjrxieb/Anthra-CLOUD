@@ -23,6 +23,11 @@ if( !array_key_exists( $selectedDocId, $docs ) ) {
 }
 $readFile = $docs[ $selectedDocId ][ 'file' ];
 
+$allowedFiles = array('file1.php', 'file2.php', 'file3.php');
+$readFile = basename($readFile);
+if (!in_array($readFile, $allowedFiles)) {
+    die('Invalid file requested');
+}
 $instructions = file_get_contents( DVWA_WEB_PAGE_TO_ROOT.$readFile );
 
 if ($docs[ $selectedDocId ]['type'] == "markdown") {

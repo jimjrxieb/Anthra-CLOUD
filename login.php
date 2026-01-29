@@ -38,7 +38,7 @@ if( isset( $_POST[ 'Login' ] ) ) {
 
 	$query  = "SELECT * FROM `users` WHERE user='$user' AND password='$pass';";
 	$result = @mysqli_query($GLOBALS["___mysqli_ston"],  $query ) or die( '<pre>' . ((is_object($GLOBALS["___mysqli_ston"])) ? mysqli_error($GLOBALS["___mysqli_ston"]) : (($___mysqli_res = mysqli_connect_error()) ? $___mysqli_res : false)) . '.<br />Try <a href="setup.php">installing again</a>.</pre>' );
-	if( $result && mysqli_num_rows( $result ) == 1 ) {    // Login Successful...
+	if( $result && mysqli_num_rows( $result ) === 1 ) {    // Login Successful...
 		dvwaMessagePush( "You have logged in as '{$user}'" );
 		dvwaLogin( $user );
 		dvwaRedirect( DVWA_WEB_PAGE_TO_ROOT . 'index.php' );

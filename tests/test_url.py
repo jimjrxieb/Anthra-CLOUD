@@ -29,7 +29,7 @@ def check_once(url):
             'User-Agent':
             'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/50.0.2661.102 Safari/537.36'
         }
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, timeout=30)
     except requests.exceptions.ConnectionError:
         return False, -1
     return response.ok, response.status_code
@@ -87,4 +87,5 @@ def test_url():
     for url, status_code in broken_urls:
         print("%s\t%d" % (url, status_code))
 
-    assert len(broken_urls) == 0, "Broken URLs Detected."
+    if len(broken_urls) > 0:
+        raise ValueError("Broken URLs Detected.")
