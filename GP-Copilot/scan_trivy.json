@@ -1,0 +1,40 @@
+{
+  "findings": [],
+  "summary": {
+    "total": 0,
+    "files_scanned": 0,
+    "severity_breakdown": {
+      "critical": 0,
+      "high": 0,
+      "medium": 0,
+      "low": 0
+    },
+    "package_managers_found": [],
+    "vulnerability_sources": {},
+    "scan_coverage": {
+      "package_files": {
+        "composer": 2
+      },
+      "dockerfile_count": 1
+    }
+  },
+  "target": "/home/jimmie/linkops-industries/GP-copilot/GP-PROJECTS/DVWA",
+  "tool": "trivy",
+  "timestamp": "2025-09-30T08:45:44.956192",
+  "scan_id": "trivy_20250930_084544_956",
+  "scan_context": {
+    "package_files": {
+      "composer": 2
+    },
+    "dockerfile_count": 1,
+    "total_files": 269
+  },
+  "metadata": {
+    "trivy_db_version": 2,
+    "scan_type": "filesystem",
+    "scan_performance": {
+      "results_processed": 0,
+      "total_vulnerabilities": 0
+    }
+  }
+}
