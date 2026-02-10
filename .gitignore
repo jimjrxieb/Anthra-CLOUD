@@ -1,7 +1,6 @@
-# Neither the config file or its backup should go
-# into the repo.
-config/config.inc.php.bak
-config/config.inc.php
+# DVWA target app config
+target-app/config/config.inc.php.bak
+target-app/config/config.inc.php
 
 # Vim swap files
 .*swp
@@ -9,8 +8,26 @@ config/config.inc.php
 # VS Code editor files
 *.code-workspace
 
-# Used by pytest
-tests/__pycache__/
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
 
 # Don't include any uploaded images
-hackable/uploads/*
+target-app/hackable/uploads/*
+
+# Scan output (generated, not committed)
+evidence/scan-reports/nist-mapping-report.json
+evidence/scan-reports/trivy-latest.json
+evidence/scan-reports/sbom-latest.json
+
+# Conftest output
+conftest-results.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build progress tracker (remove before final push)
+BUILD_PROGRESS.md
