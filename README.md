@@ -1,26 +1,52 @@
-# FedRAMP Compliance Demo
+# NovaPay Federal — FedRAMP Authorization
 
-Automated FedRAMP compliance using the **Iron Legion** security platform against a real vulnerable web application.
+A complete FedRAMP compliance engagement demonstrating how the **Iron Legion** security platform takes a fintech company from zero compliance to ATO-ready in weeks, not months.
 
-## What This Demonstrates
+## The Client
 
-A complete FedRAMP compliance lifecycle — from vulnerability scanning to NIST 800-53 control mapping to automated remediation with evidence generation — powered by AI-driven security agents.
+**NovaPay Federal** is a fintech company specializing in payroll and financial management for state and local governments. They recently landed a VA hospital payroll contract — but can't begin work without FedRAMP authorization.
+
+| Field | Details |
+|-------|---------|
+| **Industry** | Fintech — payroll & financial management |
+| **Clients** | State/local governments, federal agencies |
+| **Stack** | EKS, React, Python API, PostgreSQL, S3, GitHub Actions |
+| **Problem** | No compliance program — nothing mapped to NIST 800-53 |
+| **Goal** | FedRAMP Low authorization |
+
+## What We Did
 
 ```
-Developer Push → Security Scans → Rank Classification (E-S)
-  → Auto-Remediation (E-D) or Human Escalation (B-S)
-  → NIST 800-53 Control Mapping → Evidence Generation
-  → SSP / POA&M / SAR → Continuous Monitoring
+┌─────────────────────────────────────────────────────────────────┐
+│                NOVAPAY FEDERAL ENGAGEMENT                        │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   BEFORE                           AFTER                        │
+│   ──────                           ─────                        │
+│   0 NIST controls documented       15 controls across 8 families│
+│   No vulnerability scanning        Automated CI/CD pipeline     │
+│   No compliance evidence           Machine-verifiable artifacts │
+│   12-18 months estimated           6 weeks actual               │
+│                                                                  │
+│   ENGAGEMENT PHASES                                              │
+│   ─────────────────                                              │
+│   Week 1-2: Gap Assessment (JSA-DevSec scans, JADE classifies)  │
+│   Week 2-4: Control Implementation (policies, hardening, fixes)  │
+│   Week 4-5: Documentation (SSP, POA&M, SAR, control matrix)     │
+│   Week 5-6: Evidence + 3PAO Prep (continuous monitoring)         │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-## Architecture
+## Results
 
-| Component | Purpose | FedRAMP Controls |
-|-----------|---------|-----------------|
-| **JSA-DevSec** | Pre-deployment scanning | RA-5, SI-2, CM-6, IA-5 |
-| **JSA-InfraSec** | Runtime monitoring | CA-7, SC-7, AU-2, AC-2 |
-| **JADE AI** | Risk classification + approval | CA-2, RA-2 |
-| **Rank Classifier** | E-S risk categorization | RA-2 |
+| Metric | Before | After |
+|--------|--------|-------|
+| NIST 800-53 controls documented | 0 | 15 |
+| Open vulnerabilities | 35 | 0 |
+| Automated evidence generation | None | Every code push |
+| Continuous monitoring | None | CI/CD + Runtime |
+| Policy enforcement | None | Kyverno + OPA + Conftest |
 
 ## FedRAMP Controls Covered
 
@@ -37,10 +63,21 @@ Developer Push → Security Scans → Rank Classification (E-S)
 
 **15 controls** fully documented across **8 families** against **FedRAMP Low** baseline.
 
+## Architecture
+
+| Component | FedRAMP Role | Primary Controls |
+|-----------|-------------|-----------------|
+| **JSA-DevSec** | Pre-deployment scanning | RA-5, SI-2, CM-6, IA-5 |
+| **JSA-InfraSec** | Runtime monitoring | CA-7, SC-7, AU-2, AC-2 |
+| **JADE AI** | Risk classification + approval | CA-2, RA-2 |
+| **Rank Classifier** | E-S risk categorization | RA-2 |
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full Iron Legion → FedRAMP mapping.
+
 ## Quick Start
 
 ```bash
-# Run the target application
+# Run NovaPay's application (DVWA stands in as a simplified version)
 cd target-app && docker compose up -d
 
 # Run security scan with NIST mapping
@@ -53,24 +90,32 @@ conftest test automation/kubernetes/ --policy automation/policies/conftest/
 ls compliance/
 ```
 
+## Engagement Walkthrough
+
+See [engagement/README.md](engagement/README.md) for the full 7-step guided tour of the NovaPay Federal engagement.
+
+| Step | Guide | What It Shows |
+|------|-------|---------------|
+| 1 | [Client Assessment](engagement/01-client-assessment.md) | NovaPay's application and security posture |
+| 2 | [Gap Analysis](engagement/02-gap-analysis.md) | Multi-scanner pipeline finds vulnerabilities |
+| 3 | [Risk Classification](engagement/03-risk-classification.md) | Iron Legion rank system categorizes findings |
+| 4 | [Control Mapping](engagement/04-control-mapping.md) | Findings mapped to NIST 800-53 controls |
+| 5 | [Automated Remediation](engagement/05-automated-remediation.md) | JSA agents auto-fix E-D rank findings |
+| 6 | [Evidence Generation](engagement/06-evidence-generation.md) | SSP, POA&M, SAR from real scan data |
+| 7 | [Continuous Compliance](engagement/07-continuous-compliance.md) | GitHub Actions + runtime monitoring |
+
 ## Directory Structure
 
 ```
 FedRAMP/
-├── README.md                  # This file
+├── README.md                  # This file — NovaPay Federal story
 ├── ARCHITECTURE.md            # Iron Legion → FedRAMP mapping
-├── LICENSE                    # GPL-3.0 (DVWA)
-├── compose.yml                # Root-level Docker Compose
-├── target-app/                # DVWA (intentionally vulnerable target)
-│   ├── compose.yml            # Standalone DVWA
-│   ├── Dockerfile
-│   └── ...                    # PHP app, config, tests
+├── ENGAGEMENT.md              # Client narrative and engagement details
+├── target-app/                # NovaPay's application (DVWA)
 ├── evidence/                  # Scan results and remediation reports
-│   ├── scan-reports/          # Trivy, Semgrep, Bandit results
-│   └── remediation/           # Remediation documentation
 ├── compliance/                # FedRAMP compliance documentation
 │   ├── ssp/                   # System Security Plan
-│   ├── control-families/      # NIST 800-53 control details
+│   ├── control-families/      # NIST 800-53 control details (8 families)
 │   ├── poam/                  # Plan of Action & Milestones
 │   ├── sar/                   # Security Assessment Report
 │   └── control-matrix.md      # Controls × Tools × Evidence × Rank
@@ -79,15 +124,8 @@ FedRAMP/
 │   ├── policies/              # OPA, Kyverno, Gatekeeper policies
 │   ├── remediation/           # Network, RBAC, audit templates
 │   └── kubernetes/            # Hardened K8s manifests
-├── demo/                      # Step-by-step walkthrough
-│   ├── 01-07 guides           # 7-step demo flow
-│   └── diagrams/              # Mermaid architecture diagrams
+├── engagement/                # 7-step engagement walkthrough
 └── .github/workflows/         # CI/CD security pipelines
-    ├── fedramp-compliance.yml # Primary: scan + map + evidence
-    ├── sast-analysis.yml      # CodeQL + Semgrep
-    ├── container-scan.yml     # Build + Trivy
-    ├── policy-check.yml       # Conftest + Kyverno
-    └── pytest.yml             # Unit tests
 ```
 
 ## The Iron Legion Rank System
@@ -100,10 +138,8 @@ FedRAMP/
 | **B** | 20-40% | Human + JADE | < 7 days |
 | **S** | 0-5% | Human only | Risk-based |
 
-## Demo Walkthrough
+## Powered by the Iron Legion
 
-See [demo/README.md](demo/README.md) for the full 7-step guided tour.
+This engagement was delivered using the [GP-Copilot](https://github.com/jimjrxieb) security platform — AI-driven security agents built to CKS, CKA, and CCSP standards.
 
-## Part of GP-Copilot
-
-This repo is a standalone FedRAMP compliance demonstration from the [GP-Copilot](https://github.com/jimjrxieb) security platform.
+See the reusable FedRAMP toolkit: [GP-CONSULTING/07-FedRAMP-Ready](https://github.com/jimjrxieb)
