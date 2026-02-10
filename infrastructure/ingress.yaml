@@ -1,0 +1,31 @@
+# NovaSec Cloud Ingress — DELIBERATELY INSECURE
+# VULN: No TLS termination (SC-8 gap)
+# VULN: No rate limiting annotations
+# VULN: No WAF integration
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: novasec-ingress
+  namespace: novasec
+  # VULN: No TLS-redirect annotation
+  # VULN: No CORS restrictions
+spec:
+  rules:
+    - host: novasec.example.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: novasec-api
+                port:
+                  number: 8080
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: novasec-ui
+                port:
+                  number: 80
+  # VULN: No tls: block — plaintext HTTP (SC-8 gap)

@@ -1,0 +1,24 @@
+# NovaSec Cloud UI — DELIBERATELY INSECURE
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: novasec-ui
+  namespace: novasec
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: novasec-ui
+  template:
+    metadata:
+      labels:
+        app: novasec-ui
+    spec:
+      containers:
+        - name: ui
+          image: novasec/ui:latest  # VULN: mutable :latest tag
+          ports:
+            - containerPort: 80
+          # VULN: No securityContext
+          # VULN: No resource limits
+          # VULN: No probes

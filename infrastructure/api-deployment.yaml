@@ -1,0 +1,33 @@
+# NovaSec Cloud API — DELIBERATELY INSECURE deployment
+# Every field that should be hardened is missing or wrong.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: novasec-api
+  namespace: novasec
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: novasec-api
+  template:
+    metadata:
+      labels:
+        app: novasec-api
+      # VULN: No Falco annotations (SI-4 gap)
+      # VULN: No Istio sidecar annotation (SC-8 gap)
+    spec:
+      # VULN: Using default ServiceAccount (AC-2 gap)
+      containers:
+        - name: api
+          image: novasec/api:latest  # VULN: mutable :latest tag (SI-2 gap)
+          ports:
+            - containerPort: 8080
+          env:
+            - name: DB_HOST
+              value: novasec-db
+            - name: DB_PASSWORD
+              value: novasec_insecure_password_123  # VULN: plaintext secret (IA-5 gap)
+          # VULN: No securityContext — runs as root (AC-6 gap)
+          # VULN: No resources.limits (CM-6 gap)
+          # VULN: No liveness/readiness probes (SI-4 gap)

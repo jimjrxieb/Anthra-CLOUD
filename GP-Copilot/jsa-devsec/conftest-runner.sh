@@ -9,7 +9,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 POLICY_DIR="${SCRIPT_DIR}/../policies/opa"
-MANIFEST_DIR="${1:-${SCRIPT_DIR}/../target-app}"
+MANIFEST_DIR="${1:-${SCRIPT_DIR}/../../infrastructure}"
 
 echo "=========================================="
 echo "NovaSec Cloud — OPA Policy Validation"

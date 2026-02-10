@@ -1,101 +1,153 @@
-# NovaSec Cloud — FedRAMP Moderate Compliance Demo
+# NovaSec Cloud — FedRAMP Moderate Authorization
 
-**Client:** NovaSec Cloud (fictional SaaS security monitoring platform)
+**Client:** NovaSec Cloud (multi-tenant SaaS security monitoring platform)
 **Objective:** FedRAMP Moderate authorization to sell to DHS
-**Baseline:** NIST 800-53 Rev 5, FedRAMP Moderate (323 controls)
+**Baseline:** NIST 800-53 Rev 5 — 323 controls
 **Engagement by:** GuidePoint Security Engineering — Iron Legion Platform
 
 ---
 
-## The Scenario
+## What Is NovaSec Cloud?
 
-NovaSec Cloud is a multi-tenant SaaS security monitoring platform — think smaller
-Splunk focused on federal agencies. They need FedRAMP Moderate authorization to
-win a DHS contract for centralized log aggregation and threat detection.
+A smaller Splunk for federal agencies — centralized log aggregation, threat detection, and compliance dashboards. Multi-tenant (DHS, DoD, FBI each get isolated namespaces), runs on EKS.
 
-**Stack:** EKS (multi-tenant), React dashboard, Python/Go APIs, Elasticsearch,
-PostgreSQL, S3 (evidence storage), Kafka (event streaming)
+**The problem:** NovaSec shipped fast and insecure. The application has SQL injection, XSS, command injection, hardcoded credentials, and zero access control. The Kubernetes manifests run everything as root with no security contexts, no network policies, and no TLS.
 
-**Challenge:** Multi-tenant isolation, transmission confidentiality, real-time
-monitoring, and continuous compliance — all auditable by a 3PAO.
-
----
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                     NovaSec Cloud + Iron Legion                         │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                  │
-│  │ Tenant A     │  │ Tenant B     │  │ Tenant C     │  ← Isolated NS  │
-│  │ (DHS SOC)    │  │ (DoD SIEM)   │  │ (FBI Logs)   │                  │
-│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘                  │
-│         │                 │                 │                           │
-│         └────────────┬────┴────┬────────────┘                          │
-│                      │         │                                        │
-│              ┌───────▼───┐ ┌───▼───────┐                               │
-│              │  Kafka    │ │ Postgres  │  ← Shared infra (encrypted)   │
-│              │  (events) │ │ (metadata)│                                │
-│              └───────┬───┘ └───┬───────┘                               │
-│                      │         │                                        │
-│              ┌───────▼─────────▼───────┐                               │
-│              │    Elasticsearch        │  ← Log storage (per-tenant)   │
-│              │    (search + analytics) │                                │
-│              └─────────────────────────┘                               │
-│                                                                         │
-│  ═══════════════════ IRON LEGION OVERLAY ═══════════════════           │
-│                                                                         │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                  │
-│  │ JSA-DevSec   │  │ JSA-InfraSec │  │ JSA-SecOps   │                  │
-│  │ Pre-deploy   │  │ Runtime      │  │ Compliance   │                  │
-│  │ scanning     │  │ enforcement  │  │ reporting    │                  │
-│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘                  │
-│         └────────────┬────┴────┬────────────┘                          │
-│                      │    JADE │                                        │
-│              ┌───────▼─────────▼───────┐                               │
-│              │  JADE Supervisor (C-rank)│                               │
-│              │  Approve/escalate/report │                               │
-│              └─────────────────────────┘                               │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 8 Priority Controls
-
-| # | Control | Name | Policy Files | JSA Agent |
-|---|---------|------|-------------|-----------|
-| 1 | **AC-2** | Account Management | [OPA](policies/opa/ac2_account_management.rego), [Kyverno](policies/kyverno/enforce-tenant-isolation.yaml), [GK](policies/gatekeeper/constraints/tenant-isolation-constraint.yaml) | SecOps |
-| 2 | **AC-6** | Least Privilege | [OPA](policies/opa/ac6_least_privilege.rego), [Kyverno](policies/kyverno/require-least-privilege.yaml), [GK](policies/gatekeeper/constraints/least-privilege-constraint.yaml) | DevSec |
-| 3 | **AU-2** | Audit Events | [OPA](policies/opa/au2_audit_events.rego), [Kyverno](policies/kyverno/require-audit-logging.yaml) | InfraSec |
-| 4 | **CM-6** | Configuration Settings | [OPA](policies/opa/cm6_configuration_settings.rego), [Kyverno](policies/kyverno/require-resource-limits.yaml) | DevSec |
-| 5 | **SC-7** | Boundary Protection | [OPA](policies/opa/sc7_boundary_protection.rego), [Kyverno](policies/kyverno/enforce-network-boundaries.yaml), [GK](policies/gatekeeper/constraints/network-boundaries-constraint.yaml) | InfraSec |
-| 6 | **SC-8** | Transmission Confidentiality | [OPA](policies/opa/sc8_transmission_confidentiality.rego), [Kyverno](policies/kyverno/require-tls-everywhere.yaml), [GK](policies/gatekeeper/constraints/require-tls-constraint.yaml) | InfraSec |
-| 7 | **SI-2** | Flaw Remediation | [OPA](policies/opa/si2_flaw_remediation.rego) | DevSec |
-| 8 | **SI-4** | System Monitoring | [OPA](policies/opa/si4_system_monitoring.rego), [Falco](jsa-infrasec/falco-rules.yaml) | InfraSec |
+**The fix:** GuidePoint's Iron Legion overlay (`GP-Copilot/`) — automated policy enforcement across the full lifecycle: CI/CD scanning, admission control, runtime detection, and continuous compliance reporting.
 
 ---
 
 ## Quick Start
 
 ```bash
-# 1. DVWA target app (the deliberately vulnerable app JSA agents scan)
-cd target-app && docker compose up -d
+# Start the insecure app
+docker compose up -d
 
-# 2. Run OPA policy validation
-conftest test policies/opa/ --policy policies/opa/
+# API health check
+curl http://localhost:8080/api/health
 
-# 3. Run full scan-and-map against DVWA
-python jsa-secops/scan-and-map.py \
+# UI dashboard
+open http://localhost:3000
+```
+
+## The Vulnerabilities
+
+Every endpoint is deliberately insecure, mirroring DVWA patterns in a modern Python/Go stack:
+
+```bash
+# SQL Injection — dump all tenant logs
+curl "http://localhost:8080/api/logs?tenant_id=1' OR '1'='1"
+
+# Reflected XSS — script injection in search
+curl "http://localhost:8080/api/search?q=<script>alert('xss')</script>"
+
+# Command Injection — execute arbitrary commands
+curl -X POST http://localhost:8080/api/diagnostic \
+  -H "Content-Type: application/json" \
+  -d '{"target": "127.0.0.1; cat /etc/passwd"}'
+
+# Path Traversal — read system files
+curl "http://localhost:8080/api/reports?file=../../../etc/passwd"
+
+# Debug endpoint — leaks all environment variables
+curl http://localhost:8080/api/debug
+
+# Brute force login — no rate limiting, MD5 passwords
+curl -X POST http://localhost:8080/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "admin", "password": "admin123"}'
+```
+
+### Vulnerability Map
+
+| Endpoint | Vulnerability | DVWA Equivalent | NIST Gap |
+|----------|--------------|-----------------|----------|
+| `GET /api/logs?tenant_id=` | SQL Injection | sqli/low | SI-2 |
+| `GET /api/search?q=` | Reflected XSS | xss_r/low | SI-2 |
+| `POST /api/alerts` | Stored XSS | xss_s/low | SI-2 |
+| `POST /api/diagnostic` | Command Injection | exec/low | SI-2 |
+| `POST /api/config/upload` | Unrestricted Upload | upload/low | CM-6 |
+| `POST /api/auth/login` | No rate limit, MD5 | brute/low | AC-2, IA-5 |
+| `GET /api/reports?file=` | Path Traversal | fi/low | AC-3 |
+| `POST /api/tenant/settings` | No CSRF token | csrf/low | SC-7 |
+| All endpoints | No auth middleware | authbypass | AC-2, AC-6 |
+| `api/main.py:28` | Hardcoded DB creds | — | IA-5 |
+| `services/main.go` | No validation, no auth | — | CM-6, SI-2 |
+
+### Insecure K8s Manifests (`infrastructure/`)
+
+| What's Wrong | Control Gap |
+|-------------|------------|
+| Runs as root, no `securityContext` | AC-6 |
+| No `resources.limits` | CM-6 |
+| No NetworkPolicy | SC-7 |
+| NodePort services exposed | SC-7 |
+| No TLS on Ingress | SC-8 |
+| `:latest` image tags | SI-2 |
+| Default ServiceAccount | AC-2 |
+| No liveness/readiness probes | SI-4 |
+
+---
+
+## The Fix: GP-Copilot Iron Legion Overlay
+
+Everything in `GP-Copilot/` is what makes this FedRAMP-compliant:
+
+```
+GP-Copilot/
+├── policies/opa/           8 OPA/Rego policies (CI via Conftest)
+├── policies/kyverno/       7 Kyverno admission policies
+├── policies/gatekeeper/    4 Gatekeeper constraint pairs
+├── jsa-devsec/             Pre-deploy scanning (Trivy, Semgrep, Gitleaks)
+├── jsa-infrasec/           Runtime enforcement (Falco rules)
+├── jsa-secops/             Compliance reporting (scan-and-map)
+├── oscal/                  NIST OSCAL machine-readable compliance
+└── docs/                   Engagement documentation
+```
+
+### Run the Policies Against Insecure Manifests
+
+```bash
+# OPA policies catch all infrastructure violations
+conftest test infrastructure/ --policy GP-Copilot/policies/opa/
+
+# Full compliance scan with NIST control mapping
+python GP-Copilot/jsa-secops/scan-and-map.py \
   --client-name "NovaSec Cloud" \
-  --target-dir target-app/ \
+  --target-dir api/ \
   --dry-run
+```
 
-# 4. Collect evidence for 3PAO review
-./jsa-secops/evidence-collector.sh
+### 8 Priority Controls
+
+| Control | Name | What It Fixes |
+|---------|------|---------------|
+| **AC-2** | Account Management | Default ServiceAccount, no auth |
+| **AC-6** | Least Privilege | Root containers, no RBAC |
+| **AU-2** | Audit Events | No logging, no Falco |
+| **CM-6** | Configuration Settings | No resource limits, no hardening |
+| **SC-7** | Boundary Protection | No NetworkPolicy, NodePort exposure |
+| **SC-8** | Transmission Confidentiality | No TLS, no mTLS |
+| **SI-2** | Flaw Remediation | SQLi, XSS, command injection, :latest tags |
+| **SI-4** | System Monitoring | No runtime detection, no probes |
+
+---
+
+## Architecture
+
+```
+NovaSec Cloud (the insecure app)
+├── api/            Python FastAPI — 12 vulnerable endpoints
+├── ui/             React dashboard — renders XSS
+├── services/       Go log-ingest — no validation
+├── infrastructure/ K8s manifests — no security controls
+└── target-app/     DVWA (reference vulnerable app)
+
+GP-Copilot (the fix)
+├── CI/CD scanning      → Catch before merge
+├── Admission control   → Block at deploy
+├── Runtime enforcement → Detect in production
+└── Compliance reports  → Evidence for 3PAO
 ```
 
 ---
@@ -105,39 +157,46 @@ python jsa-secops/scan-and-map.py \
 ```
 FedRAMP/
 ├── README.md                    ← You are here
-├── target-app/                  ← DVWA (deliberately vulnerable target)
-├── policies/
-│   ├── opa/                     ← 8 Rego policies (CI via Conftest)
-│   ├── kyverno/                 ← 7 admission policies
-│   └── gatekeeper/              ← 4 template/constraint pairs
-├── jsa-devsec/                  ← Pre-deploy scanning configs
-├── jsa-infrasec/                ← Runtime enforcement (Falco rules)
-├── jsa-secops/                  ← Compliance reporting (NEW)
-├── oscal/                       ← Machine-readable compliance (OSCAL)
-├── docs/                        ← Engagement documentation
-└── .github/workflows/           ← CI/CD: scan + compliance report
+├── docker-compose.yml           ← Start the insecure app
+├── api/                         ← Python FastAPI (VULNERABLE)
+│   ├── Dockerfile
+│   ├── requirements.txt
+│   └── main.py                  ← 12 vuln endpoints
+├── ui/                          ← React dashboard (minimal)
+│   ├── Dockerfile
+│   ├── package.json
+│   ├── index.html
+│   └── src/
+├── services/                    ← Go log-ingest (VULNERABLE)
+│   ├── Dockerfile
+│   ├── go.mod
+│   └── main.go
+├── infrastructure/              ← K8s manifests (INSECURE)
+│   ├── namespace.yaml
+│   ├── api-deployment.yaml
+│   ├── ui-deployment.yaml
+│   ├── log-ingest-deployment.yaml
+│   ├── db-deployment.yaml
+│   ├── services.yaml
+│   └── ingress.yaml
+├── target-app/                  ← DVWA (reference)
+├── GP-Copilot/                  ← Iron Legion overlay (THE FIX)
+│   ├── policies/
+│   ├── jsa-devsec/
+│   ├── jsa-infrasec/
+│   ├── jsa-secops/
+│   ├── oscal/
+│   └── docs/
+└── .github/workflows/           ← CI/CD pipelines
 ```
 
 ---
 
-## Iron Legion Agents in This Engagement
+## Iron Legion Agents
 
-| Agent | Phase | Tools | Rank Range |
-|-------|-------|-------|------------|
+| Agent | Phase | What It Does | Rank |
+|-------|-------|-------------|------|
 | **JSA-DevSec** | Pre-deploy | Trivy, Semgrep, Gitleaks, Conftest | E-D |
-| **JSA-InfraSec** | Runtime | Falco, NetworkPolicy, Pod isolation | D-C |
+| **JSA-InfraSec** | Runtime | Falco, NetworkPolicy, pod isolation | D-C |
 | **JSA-SecOps** | Reporting | scan-and-map, evidence-collector | D-C |
-| **JADE** | Supervisor | Approval, escalation, rank gating | C (max) |
-
----
-
-## FedRAMP Moderate vs Low
-
-| Aspect | Low (NovaPay - previous) | Moderate (NovaSec Cloud) |
-|--------|--------------------------|--------------------------|
-| Controls | 125 | **323** |
-| Multi-tenant | No | **Yes** |
-| Transmission encryption | Basic TLS | **mTLS + SC-8** |
-| Runtime monitoring | Optional | **Required (SI-4)** |
-| OSCAL | No | **Yes** |
-| Audit depth | Basic | **Full AU-2/AU-3** |
+| **JADE** | Supervisor | Approve C-rank, escalate B-S to human | C (max) |
