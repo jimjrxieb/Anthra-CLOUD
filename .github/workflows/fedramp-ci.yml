@@ -1,0 +1,105 @@
+name: FedRAMP Moderate CI — NovaSec Cloud
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'target-app/**'
+      - 'policies/**'
+      - 'jsa-devsec/**'
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  security-events: write
+
+env:
+  TRIVY_VERSION: "0.58.0"
+  CONFTEST_VERSION: "0.56.0"
+
+jobs:
+  trivy-scan:
+    name: "RA-5/SI-2: Vulnerability Scan"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: target-app/
+          format: json
+          output: trivy-results.json
+          severity: CRITICAL,HIGH,MEDIUM
+
+      - name: Upload Trivy results
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-results
+          path: trivy-results.json
+
+  semgrep-scan:
+    name: "SA-11: SAST Analysis"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Semgrep with NovaSec rules
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: jsa-devsec/semgrep-rules.yaml
+        env:
+          SEMGREP_RULES: jsa-devsec/semgrep-rules.yaml
+
+  gitleaks-scan:
+    name: "IA-5: Secret Detection"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        with:
+          config-path: jsa-devsec/gitleaks.toml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  conftest-policies:
+    name: "CM-6: OPA Policy Validation"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Conftest
+        run: |
+          wget -q "https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz"
+          tar xzf "conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz"
+          sudo mv conftest /usr/local/bin/
+
+      - name: Validate OPA policies parse correctly
+        run: |
+          conftest verify --policy policies/opa/
+
+      - name: Run OPA policies against any K8s manifests
+        run: |
+          chmod +x jsa-devsec/conftest-runner.sh
+          ./jsa-devsec/conftest-runner.sh target-app/ || true
+
+  kyverno-validate:
+    name: "AC-6: Kyverno Policy Lint"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Kyverno policy YAML structure
+        run: |
+          for policy in policies/kyverno/*.yaml; do
+            echo "Validating: ${policy}"
+            # Basic YAML validation
+            python3 -c "import yaml; yaml.safe_load(open('${policy}'))"
+          done
+          echo "All Kyverno policies are valid YAML"

@@ -1,0 +1,59 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: novasec-require-audit-logging
+  annotations:
+    policies.kyverno.io/title: Require Audit Logging
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/minversion: 1.6.0
+    policies.kyverno.io/description: >-
+      Ensures all workloads are monitored by Falco by injecting the
+      falco.org/monitored annotation and validating audit sidecar presence
+      for high-value workloads.
+      NIST 800-53: AU-2 (Audit Events)
+      FedRAMP Moderate Baseline
+    novasec.cloud/control: AU-2
+spec:
+  validationFailureAction: Audit
+  background: true
+  rules:
+    - name: inject-falco-annotation
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-public
+                - falco
+      mutate:
+        patchStrategicMerge:
+          metadata:
+            annotations:
+              falco.org/monitored: "true"
+    - name: require-log-format-label
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-public
+      validate:
+        message: >-
+          AU-2: Pods must have a 'novasec.cloud/log-format' label
+          (json, cef, or syslog) for centralized log parsing.
+        pattern:
+          metadata:
+            labels:
+              novasec.cloud/log-format: "?*"

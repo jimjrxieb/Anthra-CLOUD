@@ -1,0 +1,55 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: novasec-require-resource-limits
+  annotations:
+    policies.kyverno.io/title: Require Resource Limits
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/minversion: 1.6.0
+    policies.kyverno.io/description: >-
+      Requires CPU and memory limits on all containers to prevent
+      resource exhaustion and ensure multi-tenant fairness.
+      NIST 800-53: CM-6 (Configuration Settings)
+      FedRAMP Moderate Baseline
+    novasec.cloud/control: CM-6
+    checkov.id: CKV_K8S_13
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: require-container-limits
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: >-
+          CM-6: All containers must define CPU and memory limits.
+          Set spec.containers[*].resources.limits.cpu and
+          spec.containers[*].resources.limits.memory.
+        pattern:
+          spec:
+            containers:
+              - resources:
+                  limits:
+                    memory: "?*"
+                    cpu: "?*"
+    - name: require-init-container-limits
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: >-
+          CM-6: Init containers must also define resource limits.
+        pattern:
+          spec:
+            =(initContainers):
+              - resources:
+                  limits:
+                    memory: "?*"
+                    cpu: "?*"

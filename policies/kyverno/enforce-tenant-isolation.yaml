@@ -1,0 +1,93 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: novasec-enforce-tenant-isolation
+  annotations:
+    policies.kyverno.io/title: Enforce Tenant Isolation
+    policies.kyverno.io/category: Multi-Tenancy
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod, Namespace
+    policies.kyverno.io/minversion: 1.6.0
+    policies.kyverno.io/description: >-
+      Enforces multi-tenant isolation: all workloads must carry a tenant
+      label, and cross-tenant references are blocked. Critical for
+      NovaSec Cloud's multi-tenant SaaS architecture.
+      NIST 800-53: AC-2 (Account Management), SC-7 (Boundary Protection)
+      FedRAMP Moderate Baseline
+    novasec.cloud/control: AC-2,SC-7
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: require-tenant-label-on-pods
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-public
+                - kube-node-lease
+                - falco
+                - monitoring
+                - istio-system
+      validate:
+        message: >-
+          AC-2/SC-7: All workloads must have label 'novasec.cloud/tenant'
+          for multi-tenant isolation and account scoping.
+        pattern:
+          metadata:
+            labels:
+              novasec.cloud/tenant: "?*"
+    - name: require-tenant-label-on-namespaces
+      match:
+        any:
+          - resources:
+              kinds:
+                - Namespace
+      exclude:
+        any:
+          - resources:
+              names:
+                - kube-system
+                - kube-public
+                - kube-node-lease
+                - gatekeeper-system
+                - falco
+                - monitoring
+                - istio-system
+                - default
+      validate:
+        message: >-
+          AC-2/SC-7: Namespaces must declare tenant ownership via
+          label 'novasec.cloud/tenant'.
+        pattern:
+          metadata:
+            labels:
+              novasec.cloud/tenant: "?*"
+    - name: require-owner-label
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-public
+                - falco
+                - monitoring
+      validate:
+        message: >-
+          AC-2: Workloads must have label 'novasec.cloud/owner' to
+          track account ownership.
+        pattern:
+          metadata:
+            labels:
+              novasec.cloud/owner: "?*"

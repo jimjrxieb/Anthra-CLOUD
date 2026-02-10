@@ -1,145 +1,143 @@
-# NovaPay Federal — FedRAMP Authorization
+# NovaSec Cloud — FedRAMP Moderate Compliance Demo
 
-A complete FedRAMP compliance engagement demonstrating how the **Iron Legion** security platform takes a fintech company from zero compliance to ATO-ready in weeks, not months.
+**Client:** NovaSec Cloud (fictional SaaS security monitoring platform)
+**Objective:** FedRAMP Moderate authorization to sell to DHS
+**Baseline:** NIST 800-53 Rev 5, FedRAMP Moderate (323 controls)
+**Engagement by:** GuidePoint Security Engineering — Iron Legion Platform
 
-## The Client
+---
 
-**NovaPay Federal** is a fintech company specializing in payroll and financial management for state and local governments. They recently landed a VA hospital payroll contract — but can't begin work without FedRAMP authorization.
+## The Scenario
 
-| Field | Details |
-|-------|---------|
-| **Industry** | Fintech — payroll & financial management |
-| **Clients** | State/local governments, federal agencies |
-| **Stack** | EKS, React, Python API, PostgreSQL, S3, GitHub Actions |
-| **Problem** | No compliance program — nothing mapped to NIST 800-53 |
-| **Goal** | FedRAMP Low authorization |
+NovaSec Cloud is a multi-tenant SaaS security monitoring platform — think smaller
+Splunk focused on federal agencies. They need FedRAMP Moderate authorization to
+win a DHS contract for centralized log aggregation and threat detection.
 
-## What We Did
+**Stack:** EKS (multi-tenant), React dashboard, Python/Go APIs, Elasticsearch,
+PostgreSQL, S3 (evidence storage), Kafka (event streaming)
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                NOVAPAY FEDERAL ENGAGEMENT                        │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│   BEFORE                           AFTER                        │
-│   ──────                           ─────                        │
-│   0 NIST controls documented       15 controls across 8 families│
-│   No vulnerability scanning        Automated CI/CD pipeline     │
-│   No compliance evidence           Machine-verifiable artifacts │
-│   12-18 months estimated           6 weeks actual               │
-│                                                                  │
-│   ENGAGEMENT PHASES                                              │
-│   ─────────────────                                              │
-│   Week 1-2: Gap Assessment (JSA-DevSec scans, JADE classifies)  │
-│   Week 2-4: Control Implementation (policies, hardening, fixes)  │
-│   Week 4-5: Documentation (SSP, POA&M, SAR, control matrix)     │
-│   Week 5-6: Evidence + 3PAO Prep (continuous monitoring)         │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-```
+**Challenge:** Multi-tenant isolation, transmission confidentiality, real-time
+monitoring, and continuous compliance — all auditable by a 3PAO.
 
-## Results
-
-| Metric | Before | After |
-|--------|--------|-------|
-| NIST 800-53 controls documented | 0 | 15 |
-| Open vulnerabilities | 35 | 0 |
-| Automated evidence generation | None | Every code push |
-| Continuous monitoring | None | CI/CD + Runtime |
-| Policy enforcement | None | Kyverno + OPA + Conftest |
-
-## FedRAMP Controls Covered
-
-| Control | Name | Status |
-|---------|------|--------|
-| AC-2, AC-3, AC-6, AC-17 | Access Control | Implemented |
-| AU-2, AU-3 | Audit & Accountability | Implemented |
-| CA-2, CA-7 | Security Assessment | Implemented |
-| CM-2, CM-6, CM-8 | Configuration Management | Implemented |
-| IA-5 | Identification & Auth | Implemented |
-| RA-5 | Risk Assessment | Implemented |
-| SC-7, SC-28 | System & Comms Protection | Implemented / Planned |
-| SI-2 | System & Info Integrity | Implemented |
-
-**15 controls** fully documented across **8 families** against **FedRAMP Low** baseline.
+---
 
 ## Architecture
 
-| Component | FedRAMP Role | Primary Controls |
-|-----------|-------------|-----------------|
-| **JSA-DevSec** | Pre-deployment scanning | RA-5, SI-2, CM-6, IA-5 |
-| **JSA-InfraSec** | Runtime monitoring | CA-7, SC-7, AU-2, AC-2 |
-| **JADE AI** | Risk classification + approval | CA-2, RA-2 |
-| **Rank Classifier** | E-S risk categorization | RA-2 |
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                     NovaSec Cloud + Iron Legion                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                  │
+│  │ Tenant A     │  │ Tenant B     │  │ Tenant C     │  ← Isolated NS  │
+│  │ (DHS SOC)    │  │ (DoD SIEM)   │  │ (FBI Logs)   │                  │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘                  │
+│         │                 │                 │                           │
+│         └────────────┬────┴────┬────────────┘                          │
+│                      │         │                                        │
+│              ┌───────▼───┐ ┌───▼───────┐                               │
+│              │  Kafka    │ │ Postgres  │  ← Shared infra (encrypted)   │
+│              │  (events) │ │ (metadata)│                                │
+│              └───────┬───┘ └───┬───────┘                               │
+│                      │         │                                        │
+│              ┌───────▼─────────▼───────┐                               │
+│              │    Elasticsearch        │  ← Log storage (per-tenant)   │
+│              │    (search + analytics) │                                │
+│              └─────────────────────────┘                               │
+│                                                                         │
+│  ═══════════════════ IRON LEGION OVERLAY ═══════════════════           │
+│                                                                         │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                  │
+│  │ JSA-DevSec   │  │ JSA-InfraSec │  │ JSA-SecOps   │                  │
+│  │ Pre-deploy   │  │ Runtime      │  │ Compliance   │                  │
+│  │ scanning     │  │ enforcement  │  │ reporting    │                  │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘                  │
+│         └────────────┬────┴────┬────────────┘                          │
+│                      │    JADE │                                        │
+│              ┌───────▼─────────▼───────┐                               │
+│              │  JADE Supervisor (C-rank)│                               │
+│              │  Approve/escalate/report │                               │
+│              └─────────────────────────┘                               │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full Iron Legion → FedRAMP mapping.
+---
+
+## 8 Priority Controls
+
+| # | Control | Name | Policy Files | JSA Agent |
+|---|---------|------|-------------|-----------|
+| 1 | **AC-2** | Account Management | [OPA](policies/opa/ac2_account_management.rego), [Kyverno](policies/kyverno/enforce-tenant-isolation.yaml), [GK](policies/gatekeeper/constraints/tenant-isolation-constraint.yaml) | SecOps |
+| 2 | **AC-6** | Least Privilege | [OPA](policies/opa/ac6_least_privilege.rego), [Kyverno](policies/kyverno/require-least-privilege.yaml), [GK](policies/gatekeeper/constraints/least-privilege-constraint.yaml) | DevSec |
+| 3 | **AU-2** | Audit Events | [OPA](policies/opa/au2_audit_events.rego), [Kyverno](policies/kyverno/require-audit-logging.yaml) | InfraSec |
+| 4 | **CM-6** | Configuration Settings | [OPA](policies/opa/cm6_configuration_settings.rego), [Kyverno](policies/kyverno/require-resource-limits.yaml) | DevSec |
+| 5 | **SC-7** | Boundary Protection | [OPA](policies/opa/sc7_boundary_protection.rego), [Kyverno](policies/kyverno/enforce-network-boundaries.yaml), [GK](policies/gatekeeper/constraints/network-boundaries-constraint.yaml) | InfraSec |
+| 6 | **SC-8** | Transmission Confidentiality | [OPA](policies/opa/sc8_transmission_confidentiality.rego), [Kyverno](policies/kyverno/require-tls-everywhere.yaml), [GK](policies/gatekeeper/constraints/require-tls-constraint.yaml) | InfraSec |
+| 7 | **SI-2** | Flaw Remediation | [OPA](policies/opa/si2_flaw_remediation.rego) | DevSec |
+| 8 | **SI-4** | System Monitoring | [OPA](policies/opa/si4_system_monitoring.rego), [Falco](jsa-infrasec/falco-rules.yaml) | InfraSec |
+
+---
 
 ## Quick Start
 
 ```bash
-# Run NovaPay's application (DVWA stands in as a simplified version)
+# 1. DVWA target app (the deliberately vulnerable app JSA agents scan)
 cd target-app && docker compose up -d
 
-# Run security scan with NIST mapping
-python automation/scanning/scan-and-map.py --target-dir target-app
+# 2. Run OPA policy validation
+conftest test policies/opa/ --policy policies/opa/
 
-# Validate Kubernetes policies
-conftest test automation/kubernetes/ --policy automation/policies/conftest/
+# 3. Run full scan-and-map against DVWA
+python jsa-secops/scan-and-map.py \
+  --client-name "NovaSec Cloud" \
+  --target-dir target-app/ \
+  --dry-run
 
-# View compliance documentation
-ls compliance/
+# 4. Collect evidence for 3PAO review
+./jsa-secops/evidence-collector.sh
 ```
 
-## Engagement Walkthrough
-
-See [engagement/README.md](engagement/README.md) for the full 7-step guided tour of the NovaPay Federal engagement.
-
-| Step | Guide | What It Shows |
-|------|-------|---------------|
-| 1 | [Client Assessment](engagement/01-client-assessment.md) | NovaPay's application and security posture |
-| 2 | [Gap Analysis](engagement/02-gap-analysis.md) | Multi-scanner pipeline finds vulnerabilities |
-| 3 | [Risk Classification](engagement/03-risk-classification.md) | Iron Legion rank system categorizes findings |
-| 4 | [Control Mapping](engagement/04-control-mapping.md) | Findings mapped to NIST 800-53 controls |
-| 5 | [Automated Remediation](engagement/05-automated-remediation.md) | JSA agents auto-fix E-D rank findings |
-| 6 | [Evidence Generation](engagement/06-evidence-generation.md) | SSP, POA&M, SAR from real scan data |
-| 7 | [Continuous Compliance](engagement/07-continuous-compliance.md) | GitHub Actions + runtime monitoring |
+---
 
 ## Directory Structure
 
 ```
 FedRAMP/
-├── README.md                  # This file — NovaPay Federal story
-├── ARCHITECTURE.md            # Iron Legion → FedRAMP mapping
-├── ENGAGEMENT.md              # Client narrative and engagement details
-├── target-app/                # NovaPay's application (DVWA)
-├── evidence/                  # Scan results and remediation reports
-├── compliance/                # FedRAMP compliance documentation
-│   ├── ssp/                   # System Security Plan
-│   ├── control-families/      # NIST 800-53 control details (8 families)
-│   ├── poam/                  # Plan of Action & Milestones
-│   ├── sar/                   # Security Assessment Report
-│   └── control-matrix.md      # Controls × Tools × Evidence × Rank
-├── automation/                # Security automation configs
-│   ├── scanning/              # Trivy, Semgrep, Gitleaks configs
-│   ├── policies/              # OPA, Kyverno, Gatekeeper policies
-│   ├── remediation/           # Network, RBAC, audit templates
-│   └── kubernetes/            # Hardened K8s manifests
-├── engagement/                # 7-step engagement walkthrough
-└── .github/workflows/         # CI/CD security pipelines
+├── README.md                    ← You are here
+├── target-app/                  ← DVWA (deliberately vulnerable target)
+├── policies/
+│   ├── opa/                     ← 8 Rego policies (CI via Conftest)
+│   ├── kyverno/                 ← 7 admission policies
+│   └── gatekeeper/              ← 4 template/constraint pairs
+├── jsa-devsec/                  ← Pre-deploy scanning configs
+├── jsa-infrasec/                ← Runtime enforcement (Falco rules)
+├── jsa-secops/                  ← Compliance reporting (NEW)
+├── oscal/                       ← Machine-readable compliance (OSCAL)
+├── docs/                        ← Engagement documentation
+└── .github/workflows/           ← CI/CD: scan + compliance report
 ```
 
-## The Iron Legion Rank System
+---
 
-| Rank | Automation | Handler | SLA |
-|------|-----------|---------|-----|
-| **E** | 95-100% | JSA auto-fix | Immediate |
-| **D** | 70-90% | JSA auto-fix + log | < 24h |
-| **C** | 40-70% | JADE approves | < 72h |
-| **B** | 20-40% | Human + JADE | < 7 days |
-| **S** | 0-5% | Human only | Risk-based |
+## Iron Legion Agents in This Engagement
 
-## Powered by the Iron Legion
+| Agent | Phase | Tools | Rank Range |
+|-------|-------|-------|------------|
+| **JSA-DevSec** | Pre-deploy | Trivy, Semgrep, Gitleaks, Conftest | E-D |
+| **JSA-InfraSec** | Runtime | Falco, NetworkPolicy, Pod isolation | D-C |
+| **JSA-SecOps** | Reporting | scan-and-map, evidence-collector | D-C |
+| **JADE** | Supervisor | Approval, escalation, rank gating | C (max) |
 
-This engagement was delivered using the [GP-Copilot](https://github.com/jimjrxieb) security platform — AI-driven security agents built to CKS, CKA, and CCSP standards.
+---
 
-See the reusable FedRAMP toolkit: [GP-CONSULTING/07-FedRAMP-Ready](https://github.com/jimjrxieb)
+## FedRAMP Moderate vs Low
+
+| Aspect | Low (NovaPay - previous) | Moderate (NovaSec Cloud) |
+|--------|--------------------------|--------------------------|
+| Controls | 125 | **323** |
+| Multi-tenant | No | **Yes** |
+| Transmission encryption | Basic TLS | **mTLS + SC-8** |
+| Runtime monitoring | Optional | **Required (SI-4)** |
+| OSCAL | No | **Yes** |
+| Audit depth | Basic | **Full AU-2/AU-3** |

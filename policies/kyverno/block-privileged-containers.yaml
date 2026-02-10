@@ -1,0 +1,90 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: novasec-block-privileged-containers
+  annotations:
+    policies.kyverno.io/title: Block Privileged Containers
+    policies.kyverno.io/category: Pod Security Standards (Baseline)
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/minversion: 1.6.0
+    policies.kyverno.io/description: >-
+      Blocks privileged containers and host namespace access (hostPID,
+      hostNetwork, hostIPC). These are the most critical pod security
+      controls — a privileged container effectively has root on the node.
+      NIST 800-53: AC-6 (Least Privilege)
+      FedRAMP Moderate Baseline
+    novasec.cloud/control: AC-6
+    checkov.id: CKV_K8S_1
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: block-privileged
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: >-
+          AC-6: Privileged containers are not allowed. Set
+          securityContext.privileged to false.
+        pattern:
+          spec:
+            containers:
+              - securityContext:
+                  privileged: false
+    - name: block-privileged-init
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: >-
+          AC-6: Privileged init containers are not allowed.
+        pattern:
+          spec:
+            =(initContainers):
+              - securityContext:
+                  privileged: false
+    - name: block-host-pid
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: >-
+          AC-6: Sharing the host PID namespace is not allowed.
+          Set spec.hostPID to false.
+        pattern:
+          spec:
+            =(hostPID): false
+    - name: block-host-network
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: >-
+          AC-6: Sharing the host network is not allowed.
+          Set spec.hostNetwork to false.
+        pattern:
+          spec:
+            =(hostNetwork): false
+    - name: block-host-ipc
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      validate:
+        message: >-
+          AC-6: Sharing the host IPC namespace is not allowed.
+          Set spec.hostIPC to false.
+        pattern:
+          spec:
+            =(hostIPC): false

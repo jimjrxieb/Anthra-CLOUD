@@ -1,0 +1,46 @@
+name: Weekly Compliance Report — NovaSec Cloud
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'  # Monday 6am UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compliance-report:
+    name: "CA-7: Generate Compliance Status Report"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install scanners
+        run: |
+          pip install semgrep
+          wget -qO- https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+          wget -qO- https://github.com/gitleaks/gitleaks/releases/latest/download/gitleaks_8.21.2_linux_x64.tar.gz | tar xz -C /usr/local/bin
+
+      - name: Run scan-and-map
+        run: |
+          python jsa-secops/scan-and-map.py \
+            --client-name "NovaSec Cloud" \
+            --target-dir target-app/ \
+            --output-dir evidence/scan-reports/
+
+      - name: Collect evidence
+        run: |
+          chmod +x jsa-secops/evidence-collector.sh
+          ./jsa-secops/evidence-collector.sh evidence/
+
+      - name: Upload compliance report
+        uses: actions/upload-artifact@v4
+        with:
+          name: compliance-report-${{ github.run_id }}
+          path: evidence/
+          retention-days: 365  # FedRAMP requires 3-year retention

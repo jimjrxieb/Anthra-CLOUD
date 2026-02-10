@@ -1,0 +1,43 @@
+# Trivy scanner configuration for NovaSec Cloud FedRAMP Moderate
+# NIST Controls: RA-5 (Vulnerability Scanning), SI-2 (Flaw Remediation)
+
+scan:
+  security-checks:
+    - vuln
+    - misconfig
+    - secret
+    - license
+
+severity:
+  - CRITICAL
+  - HIGH
+  - MEDIUM
+
+vulnerability:
+  type:
+    - os
+    - library
+  ignore-unfixed: false
+
+misconfig:
+  policy:
+    - ../policies/opa/
+  include-non-failures: false
+
+image:
+  removed-pkgs: true
+
+# FedRAMP Moderate requires scanning against known vulnerability databases
+db:
+  skip-update: false
+
+# Output format for jsa-secops ingestion
+format: json
+
+# Fail on HIGH+ for CI/CD pipeline gating
+exit-code: 1
+
+# NovaSec approved registries for image scanning
+registry:
+  - ghcr.io/novasec
+  - registry.novasec.cloud

@@ -1,0 +1,115 @@
+# Falco custom rules for NovaSec Cloud FedRAMP Moderate
+# NIST Controls: SI-4 (System Monitoring), AU-2 (Audit Events)
+#
+# These rules detect runtime threats in the NovaSec Cloud multi-tenant
+# EKS cluster. Alerts feed into jsa-infrasec for Iron Legion rank
+# classification and automated response.
+
+- rule: NovaSec Shell Spawned in Container
+  desc: >
+    Detect interactive shell execution inside a container. This is the #1
+    indicator of container compromise. NIST SI-4, MITRE T1059.004.
+  condition: >
+    spawned_process and container and
+    proc.name in (bash, sh, zsh, dash, ksh, csh, fish) and
+    not proc.pname in (crond, sshd, systemd)
+  output: >
+    Shell spawned in container (user=%user.name command=%proc.cmdline
+    container=%container.name image=%container.image.repository
+    namespace=%k8s.ns.name pod=%k8s.pod.name)
+  priority: WARNING
+  tags: [container, shell, mitre_execution, NIST-SI-4, iron-legion-C]
+
+- rule: NovaSec Crypto Mining Process
+  desc: >
+    Detect cryptocurrency mining processes. Crypto miners are the most
+    common post-exploitation payload. NIST SI-4, MITRE T1496.
+  condition: >
+    spawned_process and container and
+    (proc.name in (xmrig, minerd, cpuminer, ethminer, cgminer, bfgminer) or
+     proc.cmdline contains "stratum+tcp" or
+     proc.cmdline contains "stratum+ssl" or
+     proc.cmdline contains "mining" or
+     proc.cmdline contains "cryptonight")
+  output: >
+    Crypto mining detected (user=%user.name command=%proc.cmdline
+    container=%container.name namespace=%k8s.ns.name pod=%k8s.pod.name)
+  priority: CRITICAL
+  tags: [container, crypto, mitre_impact, NIST-SI-4, iron-legion-C]
+
+- rule: NovaSec Sensitive File Access
+  desc: >
+    Detect access to sensitive host files from containers. Indicates
+    credential harvesting or reconnaissance. NIST SI-4, MITRE T1003.
+  condition: >
+    open_read and container and
+    (fd.name startswith /etc/shadow or
+     fd.name startswith /etc/passwd or
+     fd.name startswith /etc/kubernetes or
+     fd.name startswith /var/run/secrets or
+     fd.name startswith /root/.ssh or
+     fd.name startswith /root/.kube)
+  output: >
+    Sensitive file access (user=%user.name file=%fd.name command=%proc.cmdline
+    container=%container.name namespace=%k8s.ns.name pod=%k8s.pod.name)
+  priority: WARNING
+  tags: [container, filesystem, mitre_credential_access, NIST-SI-4, iron-legion-D]
+
+- rule: NovaSec Privilege Escalation Attempt
+  desc: >
+    Detect attempts to escalate privileges inside containers via setuid,
+    sudo, or capability manipulation. NIST AC-6, MITRE T1548.
+  condition: >
+    spawned_process and container and
+    (proc.name in (sudo, su, doas) or
+     proc.cmdline contains "chmod +s" or
+     proc.cmdline contains "chmod u+s" or
+     proc.cmdline contains "setcap" or
+     proc.cmdline contains "nsenter")
+  output: >
+    Privilege escalation attempt (user=%user.name command=%proc.cmdline
+    container=%container.name namespace=%k8s.ns.name pod=%k8s.pod.name)
+  priority: CRITICAL
+  tags: [container, privilege_escalation, mitre_privilege_escalation, NIST-AC-6, iron-legion-C]
+
+- rule: NovaSec Cross-Tenant Network Access
+  desc: >
+    Detect network connections to other tenant namespaces. NovaSec Cloud
+    multi-tenant isolation requires NetworkPolicy enforcement.
+    NIST SC-7, MITRE T1021.
+  condition: >
+    outbound and container and
+    k8s.ns.name != "" and
+    fd.sip.name != "" and
+    not fd.sip.name startswith k8s.ns.name
+  output: >
+    Cross-namespace network access (src_ns=%k8s.ns.name dst=%fd.sip.name
+    user=%user.name container=%container.name pod=%k8s.pod.name)
+  priority: WARNING
+  tags: [container, network, multi-tenant, mitre_lateral_movement, NIST-SC-7, iron-legion-D]
+
+- rule: NovaSec Unexpected Outbound Connection
+  desc: >
+    Detect outbound connections to non-approved external hosts. Data
+    exfiltration indicator. NIST SC-7, MITRE T1041.
+  condition: >
+    outbound and container and
+    fd.sport > 1024 and
+    not (fd.sip in (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)) and
+    not fd.sip.name in (approved_external_hosts)
+  output: >
+    Unexpected outbound connection (dst=%fd.sip:%fd.sport
+    user=%user.name container=%container.name namespace=%k8s.ns.name
+    pod=%k8s.pod.name)
+  priority: WARNING
+  tags: [container, network, exfiltration, mitre_exfiltration, NIST-SC-7, iron-legion-D]
+
+# Approved external hosts for NovaSec Cloud operations
+- list: approved_external_hosts
+  items:
+    - "ghcr.io"
+    - "registry.novasec.cloud"
+    - "api.github.com"
+    - "eks.amazonaws.com"
+    - "s3.amazonaws.com"
+    - "elasticache.amazonaws.com"

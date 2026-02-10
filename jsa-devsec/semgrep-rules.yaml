@@ -1,0 +1,141 @@
+# Semgrep SAST rules for NovaSec Cloud FedRAMP Moderate
+# NIST Controls: SA-11 (Developer Security Testing), SI-2 (Flaw Remediation)
+#
+# Covers NovaSec stack: Python, Go, PHP (DVWA target-app), JavaScript/React
+
+rules:
+  # --- SQL Injection (NIST SI-2, Rank D) ---
+  - id: novasec-sqli-string-concat
+    patterns:
+      - pattern: |
+          $QUERY = "..." + $INPUT + "..."
+      - pattern-not: |
+          $QUERY = "..." + str($CONST) + "..."
+    message: >
+      SQL injection via string concatenation. Use parameterized queries.
+      NIST SI-2 | Iron Legion Rank: D
+    severity: ERROR
+    languages: [python, php, javascript]
+    metadata:
+      nist: [SI-2, RA-5]
+      iron-legion-rank: D
+
+  - id: novasec-sqli-fstring
+    pattern: |
+      $DB.execute(f"...{$INPUT}...")
+    message: >
+      SQL injection via f-string. Use parameterized queries with placeholders.
+      NIST SI-2 | Iron Legion Rank: D
+    severity: ERROR
+    languages: [python]
+    metadata:
+      nist: [SI-2, RA-5]
+      iron-legion-rank: D
+
+  # --- Cross-Site Scripting (NIST SI-2, Rank D) ---
+  - id: novasec-xss-reflected
+    pattern: |
+      return $RESPONSE($REQUEST.args.get(...))
+    message: >
+      Reflected XSS — user input returned directly in response without sanitization.
+      NIST SI-2 | Iron Legion Rank: D
+    severity: ERROR
+    languages: [python]
+    metadata:
+      nist: [SI-2, RA-5]
+      iron-legion-rank: D
+
+  # --- Command Injection (NIST SI-2, Rank C) ---
+  - id: novasec-cmdi-subprocess
+    patterns:
+      - pattern: |
+          subprocess.call($CMD, shell=True, ...)
+      - pattern-not: |
+          subprocess.call(["...", ...], ...)
+    message: >
+      Command injection risk — shell=True with dynamic input. Use list form.
+      NIST SI-2 | Iron Legion Rank: C
+    severity: ERROR
+    languages: [python]
+    metadata:
+      nist: [SI-2, RA-5]
+      iron-legion-rank: C
+
+  - id: novasec-cmdi-os-system
+    pattern: |
+      os.system($CMD)
+    message: >
+      Command injection via os.system(). Use subprocess with list args.
+      NIST SI-2 | Iron Legion Rank: C
+    severity: ERROR
+    languages: [python]
+    metadata:
+      nist: [SI-2, RA-5]
+      iron-legion-rank: C
+
+  # --- Hardcoded Secrets (NIST IA-5, Rank B) ---
+  - id: novasec-hardcoded-password
+    pattern: |
+      $VAR = "..."
+    metavariable-regex:
+      metavariable: $VAR
+      regex: (password|passwd|secret|api_key|apikey|token|auth)
+    message: >
+      Hardcoded credential detected. Use environment variables or a secrets manager.
+      NIST IA-5 | Iron Legion Rank: B
+    severity: WARNING
+    languages: [python, javascript, go, php]
+    metadata:
+      nist: [IA-5]
+      iron-legion-rank: B
+
+  # --- Weak Cryptography (NIST SC-13, Rank C) ---
+  - id: novasec-weak-hash-md5
+    pattern: |
+      hashlib.md5(...)
+    message: >
+      MD5 is cryptographically broken. Use SHA-256 or SHA-3.
+      NIST SC-13 | Iron Legion Rank: C
+    severity: WARNING
+    languages: [python]
+    metadata:
+      nist: [SC-13]
+      iron-legion-rank: C
+
+  - id: novasec-weak-hash-sha1
+    pattern: |
+      hashlib.sha1(...)
+    message: >
+      SHA-1 is deprecated for security use. Use SHA-256 or SHA-3.
+      NIST SC-13 | Iron Legion Rank: C
+    severity: WARNING
+    languages: [python]
+    metadata:
+      nist: [SC-13]
+      iron-legion-rank: C
+
+  # --- Missing Authentication (NIST AC-3, Rank C) ---
+  - id: novasec-flask-no-auth
+    patterns:
+      - pattern: |
+          @app.route(...)
+          def $FUNC(...):
+              ...
+      - pattern-not: |
+          @app.route(...)
+          @login_required
+          def $FUNC(...):
+              ...
+      - pattern-not: |
+          @app.route(...)
+          @auth_required
+          def $FUNC(...):
+              ...
+    message: >
+      Flask route without authentication decorator. Apply @login_required.
+      NIST AC-3 | Iron Legion Rank: C
+    severity: WARNING
+    languages: [python]
+    metadata:
+      nist: [AC-3, IA-2]
+      iron-legion-rank: C

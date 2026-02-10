@@ -1,0 +1,31 @@
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sTenantIsolation
+metadata:
+  name: novasec-tenant-isolation
+  annotations:
+    novasec.cloud/control: AC-2
+    description: >-
+      Enforce multi-tenant isolation: tenant labels, dedicated service
+      accounts, and controlled SA token mounting.
+      NIST AC-2: Manage information system accounts.
+spec:
+  enforcementAction: deny
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+      - apiGroups: ["apps"]
+        kinds: ["Deployment", "StatefulSet", "DaemonSet"]
+      - apiGroups: ["batch"]
+        kinds: ["Job", "CronJob"]
+    excludedNamespaces:
+      - kube-system
+      - kube-public
+      - kube-node-lease
+      - gatekeeper-system
+      - falco
+      - monitoring
+  parameters:
+    requiredLabels:
+      - novasec.cloud/tenant
+      - novasec.cloud/owner

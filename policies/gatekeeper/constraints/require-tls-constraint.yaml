@@ -1,0 +1,23 @@
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequireTLS
+metadata:
+  name: novasec-require-tls
+  annotations:
+    novasec.cloud/control: SC-8
+    description: >-
+      Require TLS on all Ingress and mTLS on all Services.
+      NIST SC-8: Protect the confidentiality of transmitted information.
+spec:
+  enforcementAction: deny
+  match:
+    kinds:
+      - apiGroups: ["networking.k8s.io"]
+        kinds: ["Ingress"]
+      - apiGroups: [""]
+        kinds: ["Service"]
+    excludedNamespaces:
+      - kube-system
+      - kube-public
+      - gatekeeper-system
+  parameters:
+    mtlsAnnotationKey: "novasec.cloud/mtls"

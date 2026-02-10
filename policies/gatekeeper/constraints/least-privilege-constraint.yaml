@@ -1,0 +1,23 @@
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sLeastPrivilege
+metadata:
+  name: novasec-least-privilege
+  annotations:
+    novasec.cloud/control: AC-6
+    description: >-
+      Enforce least privilege across the NovaSec Cloud cluster.
+      NIST AC-6: Employ the principle of least privilege.
+spec:
+  enforcementAction: deny
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+    excludedNamespaces:
+      - kube-system
+      - kube-public
+      - kube-node-lease
+      - gatekeeper-system
+      - falco
+  parameters:
+    allowedCapabilities: []
