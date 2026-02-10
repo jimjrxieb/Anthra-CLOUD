@@ -1,10 +1,10 @@
-# Target Application: DVWA
+# NovaPay Federal's Application (DVWA)
 
-This directory contains [DVWA (Damn Vulnerable Web Application)](https://github.com/digininja/DVWA) — an intentionally vulnerable PHP/MySQL web application used as the target for this FedRAMP compliance demonstration.
+This directory contains [DVWA (Damn Vulnerable Web Application)](https://github.com/digininja/DVWA) — standing in as a simplified version of NovaPay Federal's web application for this FedRAMP compliance engagement.
 
-## Purpose
+## Why DVWA?
 
-DVWA provides a realistic attack surface with known vulnerabilities (SQLi, XSS, command injection, CSRF, etc.) that our automated security toolchain detects, classifies, and remediates against FedRAMP NIST 800-53 controls.
+NovaPay's real production application contains proprietary code. DVWA is open-source and intentionally vulnerable, providing realistic vulnerabilities (SQLi, XSS, command injection, hardcoded credentials) that map directly to the kinds of findings we encounter in real-world FedRAMP assessments. The Iron Legion scans, classifies, and remediates these against NIST 800-53 controls — the same process used for any client application.
 
 ## Running Standalone
 
