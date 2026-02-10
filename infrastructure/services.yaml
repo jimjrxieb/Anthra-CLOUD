@@ -1,0 +1,58 @@
+# NovaSec Cloud Services — DELIBERATELY INSECURE
+# VULN: NodePort exposes services directly (SC-7 gap)
+# Should use ClusterIP + Ingress with TLS
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: novasec-api
+  namespace: novasec
+spec:
+  type: NodePort  # VULN: direct exposure
+  selector:
+    app: novasec-api
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: 30080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: novasec-ui
+  namespace: novasec
+spec:
+  type: NodePort  # VULN: direct exposure
+  selector:
+    app: novasec-ui
+  ports:
+    - port: 80
+      targetPort: 80
+      nodePort: 30000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: novasec-log-ingest
+  namespace: novasec
+spec:
+  type: NodePort  # VULN: direct exposure
+  selector:
+    app: novasec-log-ingest
+  ports:
+    - port: 9090
+      targetPort: 9090
+      nodePort: 30090
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: novasec-db
+  namespace: novasec
+spec:
+  type: ClusterIP
+  selector:
+    app: novasec-db
+  ports:
+    - port: 5432
+      targetPort: 5432

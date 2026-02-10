@@ -1,0 +1,29 @@
+# NovaSec Cloud Log Ingest — DELIBERATELY INSECURE
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: novasec-log-ingest
+  namespace: novasec
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: novasec-log-ingest
+  template:
+    metadata:
+      labels:
+        app: novasec-log-ingest
+    spec:
+      containers:
+        - name: log-ingest
+          image: novasec/log-ingest:latest  # VULN: mutable :latest tag
+          ports:
+            - containerPort: 9090
+          env:
+            - name: DB_HOST
+              value: novasec-db
+            - name: DB_PASSWORD
+              value: novasec_insecure_password_123  # VULN: plaintext secret
+          # VULN: No securityContext
+          # VULN: No resource limits
+          # VULN: No probes

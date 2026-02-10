@@ -28,15 +28,15 @@ jobs:
 
       - name: Run scan-and-map
         run: |
-          python jsa-secops/scan-and-map.py \
+          python GP-Copilot/jsa-secops/scan-and-map.py \
             --client-name "NovaSec Cloud" \
-            --target-dir target-app/ \
+            --target-dir api/ \
             --output-dir evidence/scan-reports/
 
       - name: Collect evidence
         run: |
-          chmod +x jsa-secops/evidence-collector.sh
-          ./jsa-secops/evidence-collector.sh evidence/
+          chmod +x GP-Copilot/jsa-secops/evidence-collector.sh
+          ./GP-Copilot/jsa-secops/evidence-collector.sh evidence/
 
       - name: Upload compliance report
         uses: actions/upload-artifact@v4

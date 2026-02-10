@@ -1,0 +1,31 @@
+# NovaSec Cloud Database — DELIBERATELY INSECURE
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: novasec-db
+  namespace: novasec
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: novasec-db
+  template:
+    metadata:
+      labels:
+        app: novasec-db
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15  # No digest pinning
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: novasec
+            - name: POSTGRES_USER
+              value: novasec
+            - name: POSTGRES_PASSWORD
+              value: novasec_insecure_password_123  # VULN: plaintext secret
+          # VULN: No securityContext
+          # VULN: No resource limits
+          # VULN: No persistent volume — data loss on restart

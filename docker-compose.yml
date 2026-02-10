@@ -1,0 +1,55 @@
+# NovaSec Cloud — Local Development Stack
+# DELIBERATELY INSECURE — This is a security training target
+#
+# Usage: docker compose up -d
+# API:        http://localhost:8080
+# UI:         http://localhost:3000
+# Log Ingest: http://localhost:9090
+
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: novasec
+      POSTGRES_USER: novasec
+      POSTGRES_PASSWORD: novasec_insecure_password_123
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  api:
+    build: ./api
+    ports:
+      - "8080:8080"
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: novasec
+      DB_USER: novasec
+      DB_PASSWORD: novasec_insecure_password_123
+    depends_on:
+      - db
+
+  ui:
+    build: ./ui
+    ports:
+      - "3000:80"
+    depends_on:
+      - api
+
+  log-ingest:
+    build: ./services
+    ports:
+      - "9090:9090"
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: novasec
+      DB_USER: novasec
+      DB_PASSWORD: novasec_insecure_password_123
+    depends_on:
+      - db
+
+volumes:
+  pgdata:
