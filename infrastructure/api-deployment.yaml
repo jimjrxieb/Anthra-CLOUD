@@ -1,33 +1,41 @@
-# NovaSec Cloud API — DELIBERATELY INSECURE deployment
-# Every field that should be hardened is missing or wrong.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: novasec-api
-  namespace: novasec
+  name: anthra-api
+  namespace: anthra
+  labels:
+    app: anthra-api
+    component: api
+    version: v1.0.0
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
-      app: novasec-api
+      app: anthra-api
   template:
     metadata:
       labels:
-        app: novasec-api
-      # VULN: No Falco annotations (SI-4 gap)
-      # VULN: No Istio sidecar annotation (SC-8 gap)
+        app: anthra-api
+        component: api
     spec:
-      # VULN: Using default ServiceAccount (AC-2 gap)
+      # TODO: Create custom ServiceAccount with minimal RBAC
       containers:
         - name: api
-          image: novasec/api:latest  # VULN: mutable :latest tag (SI-2 gap)
+          image: anthra/api:latest  # TODO: Pin to specific version tag
           ports:
             - containerPort: 8080
+              name: http
           env:
             - name: DB_HOST
-              value: novasec-db
+              value: anthra-db
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_NAME
+              value: anthra
+            - name: DB_USER
+              value: anthra
             - name: DB_PASSWORD
-              value: novasec_insecure_password_123  # VULN: plaintext secret (IA-5 gap)
-          # VULN: No securityContext — runs as root (AC-6 gap)
-          # VULN: No resources.limits (CM-6 gap)
-          # VULN: No liveness/readiness probes (SI-4 gap)
+              value: anthra_default_pass_123  # TODO: Move to K8s Secret
+          # TODO: Add securityContext (runAsNonRoot, drop capabilities)
+          # TODO: Add resource limits
+          # TODO: Add liveness and readiness probes

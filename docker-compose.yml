@@ -1,56 +1,79 @@
-# NovaSec Cloud — Local Development Stack
-# DELIBERATELY INSECURE — This is a security training target
+# Anthra Security Platform — Local Development Stack
 #
-# Usage: docker compose up -d
-# API:        http://localhost:8080
-# UI:         http://localhost:3000
-# Log Ingest: http://localhost:9090
+# Quick start: docker compose up -d
+#
+# Services:
+# - API:        http://localhost:8080
+# - UI:         http://localhost:3000
+# - Log Ingest: http://localhost:9090
+# - Database:   localhost:5432
 
 services:
   db:
     image: postgres:15
+    container_name: anthra-db
     environment:
-      POSTGRES_DB: novasec
-      POSTGRES_USER: novasec
-      POSTGRES_PASSWORD: novasec_insecure_password_123
+      POSTGRES_DB: anthra
+      POSTGRES_USER: anthra
+      POSTGRES_PASSWORD: anthra_default_pass_123  # CWE-798: Credentials in env vars
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    # Missing: resource limits, read-only filesystem, security options
 
   api:
     build: ./api
+    container_name: anthra-api
     ports:
       - "8080:8080"
     environment:
       DB_HOST: db
       DB_PORT: "5432"
-      DB_NAME: novasec
-      DB_USER: novasec
-      DB_PASSWORD: novasec_insecure_password_123
+      DB_NAME: anthra
+      DB_USER: anthra
+      DB_PASSWORD: anthra_default_pass_123  # CWE-522: Plaintext credentials
     depends_on:
       - db
+    # Missing: resource limits, healthchecks, security options, TLS
 
   ui:
     build: ./ui
+    container_name: anthra-ui
     ports:
       - "3000:80"
     depends_on:
       - api
+    # Missing: resource limits, healthchecks, HTTPS
 
   log-ingest:
     build: ./services
+    container_name: anthra-log-ingest
     ports:
       - "9090:9090"
     environment:
       DB_HOST: db
       DB_PORT: "5432"
-      DB_NAME: novasec
-      DB_USER: novasec
-      DB_PASSWORD: novasec_insecure_password_123
+      DB_NAME: anthra
+      DB_USER: anthra
+      DB_PASSWORD: anthra_default_pass_123  # CWE-522: Plaintext credentials
     depends_on:
       - db
+    # Missing: resource limits, healthchecks, TLS, rate limiting
 
 volumes:
   pgdata:
+    name: anthra_pgdata
+
+# =============================================================================
+# Security gaps (FedRAMP remediation needed):
+# - CWE-798/522: Credentials exposed in environment variables
+# - Missing resource limits (memory, CPU)
+# - No healthchecks configured
+# - Services run as root (no user specified)
+# - No network segmentation
+# - All ports exposed to host
+# - No TLS/mTLS between services
+# - No secrets management integration
+# =============================================================================

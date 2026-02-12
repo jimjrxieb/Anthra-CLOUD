@@ -1,8 +1,9 @@
-// NovaSec Cloud — Log Ingest Microservice
-// DELIBERATELY INSECURE — no auth, no validation, no rate limiting
+// Anthra Security Platform - Log Ingest Microservice
+// Accepts log events from distributed agents and stores them centrally
 //
-// Accepts POST /ingest with any JSON body and writes to PostgreSQL.
-// NIST gaps: CM-6 (no hardening), SI-2 (no input validation), AC-2 (no auth)
+// Built for speed-to-market by a team focused on features, not security.
+// Now needs FedRAMP hardening for federal market entry.
+
 package main
 
 import (
@@ -12,17 +13,18 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	_ "github.com/lib/pq"
 )
 
-// VULN: Hardcoded fallback credentials (IA-5 gap)
+// CWE-798: Use of hard-coded credentials in fallback values
 var (
 	dbHost = getEnv("DB_HOST", "localhost")
 	dbPort = getEnv("DB_PORT", "5432")
-	dbName = getEnv("DB_NAME", "novasec")
-	dbUser = getEnv("DB_USER", "novasec")
-	dbPass = getEnv("DB_PASSWORD", "novasec_insecure_password_123")
+	dbName = getEnv("DB_NAME", "anthra")
+	dbUser = getEnv("DB_USER", "anthra")
+	dbPass = getEnv("DB_PASSWORD", "anthra_default_pass_123")  // CWE-798
 )
 
 func getEnv(key, fallback string) string {
@@ -32,14 +34,17 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
+// LogEvent represents an incoming log entry from agents
 type LogEvent struct {
-	TenantID string `json:"tenant_id"`
-	Level    string `json:"level"`
-	Message  string `json:"message"`
-	Source   string `json:"source"`
+	TenantID  string    `json:"tenant_id"`
+	Level     string    `json:"level"`
+	Message   string    `json:"message"`
+	Source    string    `json:"source"`
+	Timestamp time.Time `json:"timestamp,omitempty"`
 }
 
 func main() {
+	// CWE-327: Use of a broken or risky cryptographic algorithm (sslmode=disable)
 	connStr := fmt.Sprintf(
 		"host=%s port=%s dbname=%s user=%s password=%s sslmode=disable",
 		dbHost, dbPort, dbName, dbUser, dbPass,
@@ -49,47 +54,93 @@ func main() {
 	if err != nil {
 		log.Printf("WARN: Cannot connect to Postgres (%v), running in log-only mode", err)
 	}
+	defer db.Close()
 
-	// VULN: No auth header check on any endpoint (AC-2 gap)
-	// VULN: No rate limiting (SI-2 gap)
-	// VULN: No input validation — accepts any JSON (CM-6 gap)
+	// CWE-306: Missing authentication for critical function
+	// No authentication middleware - accepts any traffic
+	http.HandleFunc("/ingest", ingestHandler(db))
+	http.HandleFunc("/health", healthHandler)
 
-	http.HandleFunc("/ingest", func(w http.ResponseWriter, r *http.Request) {
+	// CWE-319: Cleartext transmission of sensitive information (no TLS)
+	log.Println("Anthra log-ingest service listening on :9090")
+	log.Fatal(http.ListenAndServe(":9090", nil))  // Should use TLS
+}
+
+// ingestHandler processes incoming log events
+// Security gaps:
+// - CWE-306: No authentication (anyone can send logs)
+// - CWE-770: No rate limiting (vulnerable to flooding)
+// - CWE-20: Improper input validation (accepts any JSON structure)
+func ingestHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "POST only", http.StatusMethodNotAllowed)
 			return
 		}
 
+		// CWE-20: Minimal input validation
 		var event LogEvent
 		if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
-			http.Error(w, "bad json", http.StatusBadRequest)
+			// CWE-209: Information exposure through error message
+			http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
 			return
 		}
 
-		// VULN: No input sanitization — SQL injection possible via tenant_id
+		// TODO: Validate tenant_id format
+		// TODO: Validate level is one of: DEBUG, INFO, WARN, ERROR, CRITICAL
+		// TODO: Validate message length (prevent DOS)
+		// TODO: Check authentication header
+
+		// Store in database
 		if db != nil {
-			query := fmt.Sprintf(
-				"INSERT INTO logs (tenant_id, level, message, source) VALUES ('%s', '%s', '%s', '%s')",
-				event.TenantID, event.Level, event.Message, event.Source,
+			// Using parameterized queries (good practice maintained)
+			_, err := db.Exec(
+				"INSERT INTO logs (tenant_id, level, message, source, timestamp) VALUES ($1, $2, $3, $4, $5)",
+				event.TenantID,
+				event.Level,
+				event.Message,
+				event.Source,
+				time.Now(),
 			)
-			_, err := db.Exec(query)
 			if err != nil {
-				log.Printf("DB insert failed: %v", err)
+				// CWE-532: Insertion of sensitive information into log file
+				log.Printf("DB insert failed for tenant %s: %v", event.TenantID, err)
+				http.Error(w, "Database error", http.StatusInternalServerError)
+				return
 			}
 		}
 
+		// CWE-532: Log potentially sensitive data
 		log.Printf("[%s] %s: %s (from %s)", event.TenantID, event.Level, event.Message, event.Source)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(map[string]string{"status": "ingested"})
-	})
-
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok", "service": "log-ingest"})
-	})
-
-	log.Println("NovaSec log-ingest listening on :9090")
-	log.Fatal(http.ListenAndServe(":9090", nil))
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":    "ingested",
+			"tenant_id": event.TenantID,
+			"timestamp": time.Now().Unix(),
+		})
+	}
 }
+
+// healthHandler provides service health status
+// CWE-306: No authentication (exposes service availability)
+func healthHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "healthy",
+		"service": "anthra-log-ingest",
+		"version": "1.0.0",
+	})
+}
+
+// =============================================================================
+// TODO: Add API key authentication
+// TODO: Implement rate limiting per tenant
+// TODO: Add input validation (message length, valid log levels)
+// TODO: Enable TLS (certificate management)
+// TODO: Move credentials to AWS Secrets Manager
+// TODO: Add circuit breaker for database failures
+// TODO: Implement request tracing for observability
+// TODO: Add metrics endpoint for Prometheus
+// =============================================================================
