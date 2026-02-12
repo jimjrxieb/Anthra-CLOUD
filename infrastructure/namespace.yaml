@@ -1,9 +1,9 @@
-# NovaSec Cloud namespace — no PSA labels, no resource quotas
-# NIST gaps: AC-6 (no least privilege), CM-6 (no configuration hardening)
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: novasec
-  # VULN: No Pod Security Admission labels
-  # VULN: No resource quotas
-  # VULN: No network policy default-deny
+  name: anthra
+  labels:
+    name: anthra
+    environment: production
+    # TODO: Add Pod Security Standards labels
+    # TODO: Add NetworkPolicy labels for segmentation
