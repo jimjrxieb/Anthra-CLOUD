@@ -31,3 +31,14 @@ Thumbs.db
 
 # Build progress tracker (remove before final push)
 BUILD_PROGRESS.md
+
+# JADE backup files
+*.jade_backup
+*.bak
+
+# IDE
+.vscode/
+.idea/
+
+# Evidence (generated)
+evidence-*/

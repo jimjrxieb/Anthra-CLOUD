@@ -5,5 +5,7 @@ metadata:
   labels:
     name: anthra
     environment: production
-    # TODO: Add Pod Security Standards labels
-    # TODO: Add NetworkPolicy labels for segmentation
+    # Pod Security Standards — enforce restricted profile
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

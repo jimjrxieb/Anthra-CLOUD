@@ -1,31 +1,76 @@
-# NovaSec Cloud Database — DELIBERATELY INSECURE
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: novasec-db
-  namespace: novasec
+  name: anthra-db
+  namespace: anthra
+  labels:
+    app: anthra-db
+    component: database
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: novasec-db
+      app: anthra-db
   template:
     metadata:
       labels:
-        app: novasec-db
+        app: anthra-db
+        component: database
     spec:
+      serviceAccountName: anthra-db
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: postgres
-          image: postgres:15  # No digest pinning
+          image: postgres:15.4-alpine
           ports:
             - containerPort: 5432
           env:
             - name: POSTGRES_DB
-              value: novasec
+              value: anthra
             - name: POSTGRES_USER
-              value: novasec
+              valueFrom:
+                secretKeyRef:
+                  name: anthra-db-credentials
+                  key: username
             - name: POSTGRES_PASSWORD
-              value: novasec_insecure_password_123  # VULN: plaintext secret
-          # VULN: No securityContext
-          # VULN: No resource limits
-          # VULN: No persistent volume — data loss on restart
+              valueFrom:
+                secretKeyRef:
+                  name: anthra-db-credentials
+                  key: password
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "anthra"]
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "anthra"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: anthra-db-pvc

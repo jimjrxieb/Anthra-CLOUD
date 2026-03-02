@@ -1,0 +1,203 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Anthra Cloud — EKS cluster with managed node group and IRSA"
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: anthra
+  Environment:
+    Type: String
+    Default: production
+  EKSVersion:
+    Type: String
+    Default: "1.29"
+  NodeInstanceType:
+    Type: String
+    Default: t3.large
+  NodeMinSize:
+    Type: Number
+    Default: 3
+  NodeMaxSize:
+    Type: Number
+    Default: 6
+  NodeDesiredSize:
+    Type: Number
+    Default: 3
+
+Resources:
+  # --- EKS Cluster Role ---
+  ClusterRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-${Environment}-eks-cluster-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: eks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
+        - arn:aws:iam::aws:policy/AmazonEKSVPCResourceController
+
+  # --- EKS Cluster Security Group ---
+  ClusterSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "EKS cluster security group"
+      VpcId: !ImportValue
+        Fn::Sub: "${ProjectName}-VpcId"
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-eks-cluster-sg"
+
+  ClusterSGEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref ClusterSecurityGroup
+      IpProtocol: "-1"
+      CidrIp: "0.0.0.0/0"
+
+  # --- KMS for EKS Secrets ---
+  EKSSecretsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: "EKS secrets encryption"
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: EnableRootAccount
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: "kms:*"
+            Resource: "*"
+
+  # --- EKS Cluster ---
+  EKSCluster:
+    Type: AWS::EKS::Cluster
+    Properties:
+      Name: !Sub "${ProjectName}-eks"
+      Version: !Ref EKSVersion
+      RoleArn: !GetAtt ClusterRole.Arn
+      EncryptionConfig:
+        - Provider:
+            KeyArn: !GetAtt EKSSecretsKey.Arn
+          Resources:
+            - secrets
+      ResourcesVpcConfig:
+        SubnetIds: !Split
+          - ","
+          - !Join
+            - ","
+            - - !ImportValue
+                  Fn::Sub: "${ProjectName}-PrivateSubnets"
+              - !ImportValue
+                  Fn::Sub: "${ProjectName}-PublicSubnets"
+        SecurityGroupIds:
+          - !Ref ClusterSecurityGroup
+        EndpointPrivateAccess: true
+        EndpointPublicAccess: true
+      Logging:
+        ClusterLogging:
+          EnabledTypes:
+            - Type: api
+            - Type: audit
+            - Type: authenticator
+            - Type: controllerManager
+            - Type: scheduler
+
+  # --- Node Group Role ---
+  NodeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-${Environment}-eks-node-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
+        - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+
+  # --- Managed Node Group ---
+  NodeGroup:
+    Type: AWS::EKS::Nodegroup
+    DependsOn: EKSCluster
+    Properties:
+      ClusterName: !Ref EKSCluster
+      NodegroupName: !Sub "${ProjectName}-workers"
+      NodeRole: !GetAtt NodeRole.Arn
+      Subnets: !Split
+        - ","
+        - !ImportValue
+            Fn::Sub: "${ProjectName}-PrivateSubnets"
+      InstanceTypes:
+        - !Ref NodeInstanceType
+      ScalingConfig:
+        MinSize: !Ref NodeMinSize
+        MaxSize: !Ref NodeMaxSize
+        DesiredSize: !Ref NodeDesiredSize
+      Labels:
+        Environment: !Ref Environment
+      Tags:
+        Name: !Sub "${ProjectName}-workers"
+
+  # --- OIDC Provider for IRSA ---
+  OIDCProvider:
+    Type: AWS::IAM::OIDCProvider
+    DependsOn: EKSCluster
+    Properties:
+      Url: !GetAtt EKSCluster.OpenIdConnectIssuerUrl
+      ClientIdList:
+        - sts.amazonaws.com
+      # Thumbprint updated automatically by AWS for EKS OIDC
+
+  # --- ALB Ingress Controller Role (IRSA) ---
+  ALBControllerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-alb-controller"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref OIDCProvider
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                !Sub "${EKSCluster.OpenIdConnectIssuerUrl}:sub": "system:serviceaccount:kube-system:aws-load-balancer-controller"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/ElasticLoadBalancingFullAccess
+
+Outputs:
+  ClusterName:
+    Description: EKS cluster name
+    Value: !Ref EKSCluster
+    Export:
+      Name: !Sub "${ProjectName}-EKSClusterName"
+
+  ClusterEndpoint:
+    Description: EKS cluster endpoint
+    Value: !GetAtt EKSCluster.Endpoint
+
+  ClusterArn:
+    Description: EKS cluster ARN
+    Value: !GetAtt EKSCluster.Arn
+
+  OIDCProviderArn:
+    Description: OIDC provider ARN for IRSA
+    Value: !Ref OIDCProvider
+    Export:
+      Name: !Sub "${ProjectName}-OIDCProviderArn"
+
+  KubeconfigCommand:
+    Description: Command to update kubeconfig
+    Value: !Sub "aws eks update-kubeconfig --name ${EKSCluster} --region ${AWS::Region}"

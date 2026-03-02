@@ -1,0 +1,57 @@
+# RBAC — Least-privilege service accounts for Anthra
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: anthra-api
+  namespace: anthra
+  annotations:
+    eks.amazonaws.com/role-arn: "${API_IRSA_ROLE_ARN}"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: anthra-ui
+  namespace: anthra
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: anthra-db
+  namespace: anthra
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: anthra-log-ingest
+  namespace: anthra
+  annotations:
+    eks.amazonaws.com/role-arn: "${LOG_INGEST_IRSA_ROLE_ARN}"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: anthra-api-role
+  namespace: anthra
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["anthra-db-credentials", "anthra-api-keys"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: anthra-api-binding
+  namespace: anthra
+subjects:
+  - kind: ServiceAccount
+    name: anthra-api
+    namespace: anthra
+roleRef:
+  kind: Role
+  name: anthra-api-role
+  apiGroup: rbac.authorization.k8s.io

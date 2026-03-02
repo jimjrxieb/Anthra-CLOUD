@@ -1,58 +1,65 @@
-# NovaSec Cloud Services — DELIBERATELY INSECURE
-# VULN: NodePort exposes services directly (SC-7 gap)
-# Should use ClusterIP + Ingress with TLS
+# Anthra Cloud Services — ClusterIP only, exposed via ALB Ingress
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: novasec-api
-  namespace: novasec
-spec:
-  type: NodePort  # VULN: direct exposure
-  selector:
-    app: novasec-api
-  ports:
-    - port: 8080
-      targetPort: 8080
-      nodePort: 30080
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: novasec-ui
-  namespace: novasec
-spec:
-  type: NodePort  # VULN: direct exposure
-  selector:
-    app: novasec-ui
-  ports:
-    - port: 80
-      targetPort: 80
-      nodePort: 30000
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: novasec-log-ingest
-  namespace: novasec
-spec:
-  type: NodePort  # VULN: direct exposure
-  selector:
-    app: novasec-log-ingest
-  ports:
-    - port: 9090
-      targetPort: 9090
-      nodePort: 30090
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: novasec-db
-  namespace: novasec
+  name: anthra-api
+  namespace: anthra
+  labels:
+    app: anthra-api
 spec:
   type: ClusterIP
   selector:
-    app: novasec-db
+    app: anthra-api
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: anthra-ui
+  namespace: anthra
+  labels:
+    app: anthra-ui
+spec:
+  type: ClusterIP
+  selector:
+    app: anthra-ui
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: anthra-log-ingest
+  namespace: anthra
+  labels:
+    app: anthra-log-ingest
+spec:
+  type: ClusterIP
+  selector:
+    app: anthra-log-ingest
+  ports:
+    - port: 9090
+      targetPort: 9090
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: anthra-db
+  namespace: anthra
+  labels:
+    app: anthra-db
+spec:
+  type: ClusterIP
+  selector:
+    app: anthra-db
   ports:
     - port: 5432
       targetPort: 5432
+      protocol: TCP

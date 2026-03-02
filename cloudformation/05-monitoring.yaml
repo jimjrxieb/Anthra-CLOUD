@@ -1,0 +1,217 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Anthra Cloud — CloudWatch monitoring, alarms, and dashboards"
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: anthra
+  Environment:
+    Type: String
+    Default: production
+  AlertEmail:
+    Type: String
+    Description: "Email for alarm notifications"
+
+Resources:
+  # --- SNS Topic ---
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${ProjectName}-${Environment}-alerts"
+      KmsMasterKeyId: alias/aws/sns
+
+  AlertSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref AlertTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+
+  # --- Application Log Groups ---
+  AppLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/anthra/${Environment}/application"
+      RetentionInDays: 365
+
+  IngestLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/anthra/${Environment}/log-ingest"
+      RetentionInDays: 365
+
+  # --- EKS Node CPU Alarm ---
+  EKSCPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-eks-cpu-high"
+      AlarmDescription: "EKS node CPU > 80% for 15 minutes"
+      Namespace: ContainerInsights
+      MetricName: node_cpu_utilization
+      Dimensions:
+        - Name: ClusterName
+          Value: !ImportValue
+            Fn::Sub: "${ProjectName}-EKSClusterName"
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref AlertTopic
+
+  # --- RDS CPU Alarm ---
+  RDSCPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-rds-cpu-high"
+      AlarmDescription: "RDS CPU > 80% for 15 minutes"
+      Namespace: AWS/RDS
+      MetricName: CPUUtilization
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Sub "${ProjectName}-${Environment}-postgres"
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref AlertTopic
+
+  # --- RDS Storage Alarm ---
+  RDSStorageAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-rds-storage-low"
+      AlarmDescription: "RDS free storage < 5GB"
+      Namespace: AWS/RDS
+      MetricName: FreeStorageSpace
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Sub "${ProjectName}-${Environment}-postgres"
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5368709120
+      ComparisonOperator: LessThanThreshold
+      AlarmActions:
+        - !Ref AlertTopic
+
+  # --- Root Account Usage ---
+  RootUsageFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Sub "/aws/cloudtrail/${ProjectName}-${Environment}"
+      FilterPattern: '{ $.userIdentity.type = "Root" && $.userIdentity.invokedBy NOT EXISTS && $.eventType != "AwsServiceEvent" }'
+      MetricTransformations:
+        - MetricNamespace: !Sub "${ProjectName}/Security"
+          MetricName: RootAccountUsage
+          MetricValue: "1"
+
+  RootUsageAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-root-account-usage"
+      AlarmDescription: "Root account was used — investigate immediately"
+      Namespace: !Sub "${ProjectName}/Security"
+      MetricName: RootAccountUsage
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertTopic
+
+  # --- Console Signin Failures ---
+  SigninFailureFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Sub "/aws/cloudtrail/${ProjectName}-${Environment}"
+      FilterPattern: '{ $.eventName = "ConsoleLogin" && $.errorMessage = "Failed authentication" }'
+      MetricTransformations:
+        - MetricNamespace: !Sub "${ProjectName}/Security"
+          MetricName: ConsoleSigninFailures
+          MetricValue: "1"
+
+  SigninFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-signin-failures"
+      AlarmDescription: "3+ console sign-in failures in 5 minutes"
+      Namespace: !Sub "${ProjectName}/Security"
+      MetricName: ConsoleSigninFailures
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 3
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertTopic
+
+  # --- Dashboard ---
+  OperationalDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub "${ProjectName}-${Environment}-operations"
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0, "y": 0, "width": 12, "height": 6,
+              "properties": {
+                "title": "EKS Node CPU",
+                "metrics": [["ContainerInsights", "node_cpu_utilization", "ClusterName", "${ProjectName}-eks"]],
+                "period": 300,
+                "stat": "Average",
+                "region": "${AWS::Region}"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12, "y": 0, "width": 12, "height": 6,
+              "properties": {
+                "title": "RDS CPU",
+                "metrics": [["AWS/RDS", "CPUUtilization", "DBInstanceIdentifier", "${ProjectName}-${Environment}-postgres"]],
+                "period": 300,
+                "stat": "Average",
+                "region": "${AWS::Region}"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0, "y": 6, "width": 12, "height": 6,
+              "properties": {
+                "title": "RDS Connections",
+                "metrics": [["AWS/RDS", "DatabaseConnections", "DBInstanceIdentifier", "${ProjectName}-${Environment}-postgres"]],
+                "period": 300,
+                "stat": "Average",
+                "region": "${AWS::Region}"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12, "y": 6, "width": 12, "height": 6,
+              "properties": {
+                "title": "RDS Free Storage",
+                "metrics": [["AWS/RDS", "FreeStorageSpace", "DBInstanceIdentifier", "${ProjectName}-${Environment}-postgres"]],
+                "period": 300,
+                "stat": "Average",
+                "region": "${AWS::Region}"
+              }
+            }
+          ]
+        }
+
+Outputs:
+  AlertTopicArn:
+    Description: SNS topic for alerts
+    Value: !Ref AlertTopic
+
+  DashboardURL:
+    Description: CloudWatch dashboard URL
+    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home#dashboards:name=${ProjectName}-${Environment}-operations"

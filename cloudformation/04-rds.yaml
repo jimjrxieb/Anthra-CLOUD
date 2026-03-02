@@ -1,0 +1,158 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Anthra Cloud — RDS PostgreSQL Multi-AZ with encryption"
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: anthra
+  Environment:
+    Type: String
+    Default: production
+  DBInstanceClass:
+    Type: String
+    Default: db.t3.medium
+
+Resources:
+  # --- KMS for RDS ---
+  RDSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: "RDS encryption for Anthra"
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: EnableRootAccount
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: "kms:*"
+            Resource: "*"
+
+  # --- Security Group ---
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "RDS PostgreSQL — EKS pods only"
+      VpcId: !ImportValue
+        Fn::Sub: "${ProjectName}-VpcId"
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          Description: "PostgreSQL from private subnets"
+          CidrIp: "10.0.0.0/16"
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-rds-sg"
+
+  # --- Secrets Manager ---
+  DBSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${ProjectName}/${Environment}/db-credentials"
+      Description: "Anthra PostgreSQL credentials"
+      KmsKeyId: !Ref RDSKey
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "anthra_admin"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludeCharacters: '"@/\'
+
+  # --- RDS Instance ---
+  PostgresDB:
+    Type: AWS::RDS::DBInstance
+    DependsOn: DBSecret
+    Properties:
+      DBInstanceIdentifier: !Sub "${ProjectName}-${Environment}-postgres"
+      Engine: postgres
+      EngineVersion: "15.4"
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: 50
+      MaxAllocatedStorage: 200
+      DBName: anthra
+      MasterUsername: !Sub "{{resolve:secretsmanager:${DBSecret}:SecretString:username}}"
+      MasterUserPassword: !Sub "{{resolve:secretsmanager:${DBSecret}:SecretString:password}}"
+      MultiAZ: true
+      StorageEncrypted: true
+      KmsKeyId: !Ref RDSKey
+      DBSubnetGroupName: !ImportValue
+        Fn::Sub: "${ProjectName}-DBSubnetGroup"
+      VPCSecurityGroups:
+        - !Ref RDSSecurityGroup
+      PubliclyAccessible: false
+      BackupRetentionPeriod: 35
+      PreferredBackupWindow: "03:00-04:00"
+      PreferredMaintenanceWindow: "sun:04:00-sun:05:00"
+      EnableCloudwatchLogsExports:
+        - postgresql
+        - upgrade
+      DeletionProtection: true
+      CopyTagsToSnapshot: true
+      EnablePerformanceInsights: true
+      PerformanceInsightsKMSKeyId: !Ref RDSKey
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-postgres"
+
+  # --- ElastiCache Redis ---
+  RedisSubnetGroup:
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties:
+      CacheSubnetGroupName: !Sub "${ProjectName}-redis-subnet"
+      Description: "Redis subnet group"
+      SubnetIds: !Split
+        - ","
+        - !ImportValue
+            Fn::Sub: "${ProjectName}-PrivateSubnets"
+
+  RedisSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "Redis — EKS pods only"
+      VpcId: !ImportValue
+        Fn::Sub: "${ProjectName}-VpcId"
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 6379
+          ToPort: 6379
+          Description: "Redis from private subnets"
+          CidrIp: "10.0.0.0/16"
+
+  RedisCluster:
+    Type: AWS::ElastiCache::CacheCluster
+    Properties:
+      ClusterName: !Sub "${ProjectName}-redis"
+      Engine: redis
+      EngineVersion: "7.1"
+      CacheNodeType: cache.t3.medium
+      NumCacheNodes: 1
+      CacheSubnetGroupName: !Ref RedisSubnetGroup
+      VpcSecurityGroupIds:
+        - !Ref RedisSecurityGroup
+      PreferredMaintenanceWindow: "sun:05:00-sun:06:00"
+      SnapshotRetentionLimit: 7
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-redis"
+
+Outputs:
+  RDSEndpoint:
+    Description: RDS PostgreSQL endpoint
+    Value: !GetAtt PostgresDB.Endpoint.Address
+    Export:
+      Name: !Sub "${ProjectName}-RDSEndpoint"
+
+  RDSPort:
+    Description: RDS PostgreSQL port
+    Value: !GetAtt PostgresDB.Endpoint.Port
+
+  DBSecretArn:
+    Description: Secrets Manager ARN for DB credentials
+    Value: !Ref DBSecret
+
+  RedisEndpoint:
+    Description: ElastiCache Redis endpoint
+    Value: !GetAtt RedisCluster.RedisEndpoint.Address
+    Export:
+      Name: !Sub "${ProjectName}-RedisEndpoint"
