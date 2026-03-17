@@ -32,7 +32,7 @@ DEBUG_MODE = os.getenv("DEBUG_MODE", "false").lower() == "true"
 
 app = FastAPI(
     title="Anthra Security Platform",
-    version="1.0.0",
+    version="1.1.0",
     description="Cloud-native security monitoring and threat detection",
 )
 
