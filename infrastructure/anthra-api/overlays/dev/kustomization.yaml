@@ -49,5 +49,5 @@ patches:
     kind: ResourceQuota
 images:
 - name: anthra/api
-  newName: ghcr.io/jimjrxieb/anthra-api
-  newTag: sha-fcda220
+  newName: 026090554981.dkr.ecr.us-east-1.amazonaws.com/anthra-api
+  newTag: sha-9934ecd
