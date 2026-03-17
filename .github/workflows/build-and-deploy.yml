@@ -10,12 +10,15 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write       # Needed to push image tag updates back to repo
-  packages: write       # Needed to push to GHCR
+  contents: write       # Push image tag updates back to repo
+  packages: write       # Push to GHCR
+  id-token: write       # OIDC → AWS temporary credentials
 
 env:
-  REGISTRY: ghcr.io
+  GHCR_REGISTRY: ghcr.io
+  ECR_REGISTRY: 026090554981.dkr.ecr.us-east-1.amazonaws.com
   OWNER: jimjrxieb
+  AWS_REGION: us-east-1
 
 jobs:
   # ─── Detect which services changed ─────────────────────────────────
@@ -39,36 +42,40 @@ jobs:
             ui:
               - 'ui/**'
 
-  # ─── Build & Push images ───────────────────────────────────────────
+  # ─── Build & Push images (GHCR + ECR) ──────────────────────────────
   build-api:
     name: Build anthra-api
     needs: changes
     if: needs.changes.outputs.api == 'true'
     runs-on: ubuntu-latest
     outputs:
-      image-tag: ${{ steps.meta.outputs.version }}
+      image-tag: ${{ steps.tags.outputs.sha_tag }}
     steps:
       - uses: actions/checkout@v4
 
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+
       - uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ${{ env.GHCR_REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.OWNER }}/anthra-api
-          tags: |
-            type=sha,prefix=sha-,format=short
+      - id: tags
+        run: echo "sha_tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/build-push-action@v6
         with:
           context: ./api
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: |
+            ${{ env.GHCR_REGISTRY }}/${{ env.OWNER }}/anthra-api:${{ steps.tags.outputs.sha_tag }}
+            ${{ env.ECR_REGISTRY }}/anthra-api:${{ steps.tags.outputs.sha_tag }}
 
   build-services:
     name: Build anthra-log-ingest
@@ -76,29 +83,33 @@ jobs:
     if: needs.changes.outputs.services == 'true'
     runs-on: ubuntu-latest
     outputs:
-      image-tag: ${{ steps.meta.outputs.version }}
+      image-tag: ${{ steps.tags.outputs.sha_tag }}
     steps:
       - uses: actions/checkout@v4
 
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+
       - uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ${{ env.GHCR_REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.OWNER }}/anthra-log-ingest
-          tags: |
-            type=sha,prefix=sha-,format=short
+      - id: tags
+        run: echo "sha_tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/build-push-action@v6
         with:
           context: ./services
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: |
+            ${{ env.GHCR_REGISTRY }}/${{ env.OWNER }}/anthra-log-ingest:${{ steps.tags.outputs.sha_tag }}
+            ${{ env.ECR_REGISTRY }}/anthra-log-ingest:${{ steps.tags.outputs.sha_tag }}
 
   build-ui:
     name: Build anthra-ui
@@ -106,31 +117,36 @@ jobs:
     if: needs.changes.outputs.ui == 'true'
     runs-on: ubuntu-latest
     outputs:
-      image-tag: ${{ steps.meta.outputs.version }}
+      image-tag: ${{ steps.tags.outputs.sha_tag }}
     steps:
       - uses: actions/checkout@v4
 
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+
       - uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ${{ env.GHCR_REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.OWNER }}/anthra-ui
-          tags: |
-            type=sha,prefix=sha-,format=short
+      - id: tags
+        run: echo "sha_tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/build-push-action@v6
         with:
           context: ./ui
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: |
+            ${{ env.GHCR_REGISTRY }}/${{ env.OWNER }}/anthra-ui:${{ steps.tags.outputs.sha_tag }}
+            ${{ env.ECR_REGISTRY }}/anthra-ui:${{ steps.tags.outputs.sha_tag }}
 
   # ─── Update Kustomize image tags (auto-deploy to dev) ──────────────
+  #     Points to ECR since that's where EKS pulls from
   update-manifests:
     name: Update image tags → dev
     needs: [build-api, build-services, build-ui]
@@ -145,26 +161,24 @@ jobs:
         run: |
           SHORT_SHA="${GITHUB_SHA::7}"
 
-          # Update each service that was built
           if [ "${{ needs.build-api.result }}" = "success" ]; then
             echo "Updating anthra-api → sha-${SHORT_SHA}"
             cd infrastructure/anthra-api/overlays/dev
-            # Use kustomize edit to set the new image
-            kustomize edit set image anthra/api=${{ env.REGISTRY }}/${{ env.OWNER }}/anthra-api:sha-${SHORT_SHA}
+            kustomize edit set image anthra/api=${{ env.ECR_REGISTRY }}/anthra-api:sha-${SHORT_SHA}
             cd ../../../..
           fi
 
           if [ "${{ needs.build-services.result }}" = "success" ]; then
             echo "Updating anthra-log-ingest → sha-${SHORT_SHA}"
             cd infrastructure/anthra-log-ingest/overlays/dev
-            kustomize edit set image anthra/log-ingest=${{ env.REGISTRY }}/${{ env.OWNER }}/anthra-log-ingest:sha-${SHORT_SHA}
+            kustomize edit set image anthra/log-ingest=${{ env.ECR_REGISTRY }}/anthra-log-ingest:sha-${SHORT_SHA}
             cd ../../../..
           fi
 
           if [ "${{ needs.build-ui.result }}" = "success" ]; then
             echo "Updating anthra-ui → sha-${SHORT_SHA}"
             cd infrastructure/anthra-ui/overlays/dev
-            kustomize edit set image anthra/ui=${{ env.REGISTRY }}/${{ env.OWNER }}/anthra-ui:sha-${SHORT_SHA}
+            kustomize edit set image anthra/ui=${{ env.ECR_REGISTRY }}/anthra-ui:sha-${SHORT_SHA}
             cd ../../../..
           fi
 
@@ -173,7 +187,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add infrastructure/
-          # Only commit if there are changes
           if git diff --cached --quiet; then
             echo "No manifest changes to commit"
           else
@@ -191,7 +204,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main  # Get the latest (after update-manifests pushed)
+          ref: main
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Copy image tags from dev to staging
@@ -200,9 +213,7 @@ jobs:
             DEV_KUST="infrastructure/${service}/overlays/dev/kustomization.yaml"
             STAGING_KUST="infrastructure/${service}/overlays/staging/kustomization.yaml"
 
-            # Extract images block from dev overlay if it exists
             if grep -q "images:" "$DEV_KUST" 2>/dev/null; then
-              # Get the images section from dev
               python3 -c "
           import yaml
           with open('$DEV_KUST') as f:
