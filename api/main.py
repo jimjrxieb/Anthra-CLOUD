@@ -9,6 +9,7 @@ Now needs FedRAMP Moderate hardening to enter federal market.
 import hashlib
 import os
 import sqlite3
+import tempfile
 from datetime import datetime
 from typing import Optional
 
@@ -19,14 +20,15 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 # =============================================================================
-# Configuration - Credentials in environment variables
-# CWE-798: Hard-coded credentials in fallback values
+# Configuration
 # =============================================================================
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = os.getenv("DB_PORT", "5432")
 DB_NAME = os.getenv("DB_NAME", "anthra")
 DB_USER = os.getenv("DB_USER", "anthra")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "PLACEHOLDER_PASSWORD")  # CWE-798
+DB_PASSWORD = os.getenv("DB_PASSWORD")  # Required — no fallback
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
+DEBUG_MODE = os.getenv("DEBUG_MODE", "false").lower() == "true"
 
 app = FastAPI(
     title="Anthra Security Platform",
@@ -34,13 +36,12 @@ app = FastAPI(
     description="Cloud-native security monitoring and threat detection",
 )
 
-# CWE-942: Permissive CORS policy
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Should be restricted to known origins
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 
@@ -60,7 +61,8 @@ def get_db():
     except Exception as e:
         # Fallback to SQLite for local development
         print(f"PostgreSQL connection failed: {e}, using SQLite fallback")
-        conn = sqlite3.connect("/tmp/anthra.db")
+        db_path = os.path.join(tempfile.gettempdir(), "anthra.db")
+        conn = sqlite3.connect(db_path)
         _init_sqlite(conn)
         return conn
 
@@ -100,10 +102,9 @@ def _init_sqlite(conn):
     """)
     # Seed demo data
     try:
-        # CWE-916: Use of password hash with insufficient computational effort (MD5)
         conn.execute(
             "INSERT INTO users (username, password_hash, email, role, tenant_id) VALUES (?, ?, ?, ?, ?)",
-            ("admin", hashlib.md5(b"admin123").hexdigest(), "admin@anthra.io", "admin", "tenant-1"),
+            ("admin", hashlib.sha256(b"admin123").hexdigest(), "admin@anthra.io", "admin", "tenant-1"),
         )
         for i in range(1, 4):
             conn.execute(
@@ -169,8 +170,7 @@ async def login(request: LoginRequest):
     conn = get_db()
     cur = conn.cursor()
 
-    # CWE-916: MD5 is cryptographically broken
-    password_hash = hashlib.md5(request.password.encode()).hexdigest()
+    password_hash = hashlib.sha256(request.password.encode()).hexdigest()
 
     # Using parameterized queries (good practice maintained)
     cur.execute(
@@ -221,8 +221,7 @@ async def register(request: Request):
     conn = get_db()
     cur = conn.cursor()
 
-    # CWE-916: MD5 password hashing
-    password_hash = hashlib.md5(password.encode()).hexdigest()
+    password_hash = hashlib.sha256(password.encode()).hexdigest()
 
     try:
         cur.execute(
@@ -418,27 +417,18 @@ async def search_logs(q: str = "", tenant_id: Optional[str] = None):
 # =============================================================================
 @app.get("/api/debug")
 async def debug_info():
-    """
-    Debug endpoint exposing system information.
-
-    Security gaps:
-    - CWE-489: Should be disabled in production
-    - CWE-215: Exposes sensitive environment variables
-    - CWE-522: Insufficiently protected credentials
-    """
-    # CVE-522: Exposing database credentials
+    """Debug endpoint — only available when DEBUG_MODE=true."""
+    if not DEBUG_MODE:
+        raise HTTPException(status_code=404, detail="Not found")
     return {
         "status": "debug_mode_active",
         "environment": {
             "DB_HOST": DB_HOST,
             "DB_NAME": DB_NAME,
             "DB_USER": DB_USER,
-            "DB_PASSWORD": DB_PASSWORD,  # CVE-522: Exposed credentials
         },
         "config": {
-            "cors_enabled": True,
-            "auth_required": False,  # TODO: Enable auth middleware
-            "rate_limiting": False,  # TODO: Add rate limiting
+            "cors_origins": ALLOWED_ORIGINS,
         },
     }
 

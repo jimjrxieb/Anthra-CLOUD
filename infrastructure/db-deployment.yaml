@@ -48,6 +48,7 @@ spec:
               value: /var/lib/postgresql/data/pgdata
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
           resources:
@@ -70,7 +71,17 @@ spec:
           volumeMounts:
             - name: postgres-data
               mountPath: /var/lib/postgresql/data
+            - name: tmp
+              mountPath: /tmp
+            - name: run
+              mountPath: /var/run/postgresql
       volumes:
         - name: postgres-data
           persistentVolumeClaim:
             claimName: anthra-db-pvc
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: run
+          emptyDir:
+            sizeLimit: 8Mi
