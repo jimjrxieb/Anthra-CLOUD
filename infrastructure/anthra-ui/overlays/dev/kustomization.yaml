@@ -1,0 +1,49 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+# Dev: single replica, relaxed resources, latest tag OK
+replicas:
+  - name: anthra-ui
+    count: 1
+
+patches:
+  # Relax resource limits for dev
+  - target:
+      kind: Deployment
+      name: anthra-ui
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: "64Mi"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/cpu
+        value: "50m"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: "256Mi"
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: "250m"
+
+  # Relax quota for dev
+  - target:
+      kind: ResourceQuota
+    patch: |-
+      - op: replace
+        path: /spec/hard/pods
+        value: "10"
+      - op: replace
+        path: /spec/hard/requests.cpu
+        value: "1"
+      - op: replace
+        path: /spec/hard/limits.cpu
+        value: "2"
+      - op: replace
+        path: /spec/hard/requests.memory
+        value: "1Gi"
+      - op: replace
+        path: /spec/hard/limits.memory
+        value: "2Gi"

@@ -1,0 +1,231 @@
+name: Build, Push, Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'api/**'
+      - 'services/**'
+      - 'ui/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write       # Needed to push image tag updates back to repo
+  packages: write       # Needed to push to GHCR
+
+env:
+  REGISTRY: ghcr.io
+  OWNER: jimjrxieb
+
+jobs:
+  # ─── Detect which services changed ─────────────────────────────────
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.filter.outputs.api }}
+      services: ${{ steps.filter.outputs.services }}
+      ui: ${{ steps.filter.outputs.ui }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            api:
+              - 'api/**'
+            services:
+              - 'services/**'
+            ui:
+              - 'ui/**'
+
+  # ─── Build & Push images ───────────────────────────────────────────
+  build-api:
+    name: Build anthra-api
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.OWNER }}/anthra-api
+          tags: |
+            type=sha,prefix=sha-,format=short
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./api
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  build-services:
+    name: Build anthra-log-ingest
+    needs: changes
+    if: needs.changes.outputs.services == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.OWNER }}/anthra-log-ingest
+          tags: |
+            type=sha,prefix=sha-,format=short
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./services
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  build-ui:
+    name: Build anthra-ui
+    needs: changes
+    if: needs.changes.outputs.ui == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.OWNER }}/anthra-ui
+          tags: |
+            type=sha,prefix=sha-,format=short
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./ui
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  # ─── Update Kustomize image tags (auto-deploy to dev) ──────────────
+  update-manifests:
+    name: Update image tags → dev
+    needs: [build-api, build-services, build-ui]
+    if: always() && (needs.build-api.result == 'success' || needs.build-services.result == 'success' || needs.build-ui.result == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update Kustomize image tags for dev
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+
+          # Update each service that was built
+          if [ "${{ needs.build-api.result }}" = "success" ]; then
+            echo "Updating anthra-api → sha-${SHORT_SHA}"
+            cd infrastructure/anthra-api/overlays/dev
+            # Use kustomize edit to set the new image
+            kustomize edit set image anthra/api=${{ env.REGISTRY }}/${{ env.OWNER }}/anthra-api:sha-${SHORT_SHA}
+            cd ../../../..
+          fi
+
+          if [ "${{ needs.build-services.result }}" = "success" ]; then
+            echo "Updating anthra-log-ingest → sha-${SHORT_SHA}"
+            cd infrastructure/anthra-log-ingest/overlays/dev
+            kustomize edit set image anthra/log-ingest=${{ env.REGISTRY }}/${{ env.OWNER }}/anthra-log-ingest:sha-${SHORT_SHA}
+            cd ../../../..
+          fi
+
+          if [ "${{ needs.build-ui.result }}" = "success" ]; then
+            echo "Updating anthra-ui → sha-${SHORT_SHA}"
+            cd infrastructure/anthra-ui/overlays/dev
+            kustomize edit set image anthra/ui=${{ env.REGISTRY }}/${{ env.OWNER }}/anthra-ui:sha-${SHORT_SHA}
+            cd ../../../..
+          fi
+
+      - name: Commit and push tag updates
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add infrastructure/
+          # Only commit if there are changes
+          if git diff --cached --quiet; then
+            echo "No manifest changes to commit"
+          else
+            git commit -m "ci: update image tags to sha-${GITHUB_SHA::7} [skip ci]"
+            git push
+          fi
+
+  # ─── Promote to staging (manual trigger) ───────────────────────────
+  promote-staging:
+    name: Promote dev → staging
+    needs: update-manifests
+    if: always() && needs.update-manifests.result == 'success'
+    runs-on: ubuntu-latest
+    environment: staging  # Requires approval in GitHub Settings → Environments
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main  # Get the latest (after update-manifests pushed)
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Copy image tags from dev to staging
+        run: |
+          for service in anthra-api anthra-log-ingest anthra-ui; do
+            DEV_KUST="infrastructure/${service}/overlays/dev/kustomization.yaml"
+            STAGING_KUST="infrastructure/${service}/overlays/staging/kustomization.yaml"
+
+            # Extract images block from dev overlay if it exists
+            if grep -q "images:" "$DEV_KUST" 2>/dev/null; then
+              # Get the images section from dev
+              python3 -c "
+          import yaml
+          with open('$DEV_KUST') as f:
+              dev = yaml.safe_load(f)
+          with open('$STAGING_KUST') as f:
+              staging = yaml.safe_load(f)
+          if 'images' in dev:
+              staging['images'] = dev['images']
+              with open('$STAGING_KUST', 'w') as f:
+                  yaml.dump(staging, f, default_flow_style=False)
+              print(f'  {service}: promoted to staging')
+          "
+            fi
+          done
+
+      - name: Commit staging promotion
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add infrastructure/
+          if git diff --cached --quiet; then
+            echo "No changes to promote"
+          else
+            git commit -m "ci: promote to staging — sha-${GITHUB_SHA::7} [skip ci]"
+            git push
+          fi

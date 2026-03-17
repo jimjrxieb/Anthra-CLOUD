@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: anthra-db
+  namespace: anthra
+  labels:
+    app: anthra-db
+automountServiceAccountToken: false
