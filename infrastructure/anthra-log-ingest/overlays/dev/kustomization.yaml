@@ -49,5 +49,5 @@ patches:
     kind: ResourceQuota
 images:
 - name: anthra/log-ingest
-  newName: 026090554981.dkr.ecr.us-east-1.amazonaws.com/anthra-log-ingest
+  newName: ghcr.io/jimjrxieb/anthra-log-ingest
   newTag: sha-9934ecd

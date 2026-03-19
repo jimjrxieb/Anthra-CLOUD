@@ -62,14 +62,14 @@ spec:
 
           livenessProbe:
             httpGet:
-              path: /health
+              path: /
               port: 8080
             initialDelaySeconds: 15
             periodSeconds: 20
 
           readinessProbe:
             httpGet:
-              path: /health
+              path: /
               port: 8080
             initialDelaySeconds: 5
             periodSeconds: 10
@@ -77,7 +77,20 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+            - name: nginx-run
+              mountPath: /var/run
+            - name: nginx-conf
+              mountPath: /etc/nginx/conf.d
 
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: nginx-cache
+          emptyDir: {}
+        - name: nginx-run
+          emptyDir: {}
+        - name: nginx-conf
+          configMap:
+            name: anthra-ui-nginx-conf

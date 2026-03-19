@@ -78,6 +78,10 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 10
 
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data

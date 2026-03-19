@@ -10,3 +10,4 @@ resources:
   - resourcequota.yaml
   - limitrange.yaml
   - pdb.yaml
+  - configmap.yaml

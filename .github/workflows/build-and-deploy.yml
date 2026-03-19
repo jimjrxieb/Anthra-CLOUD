@@ -7,6 +7,8 @@ on:
       - 'api/**'
       - 'services/**'
       - 'ui/**'
+      - 'infrastructure/**'
+      - 'policies/**'
   workflow_dispatch:
 
 permissions:
@@ -19,8 +21,50 @@ env:
   ECR_REGISTRY: 026090554981.dkr.ecr.us-east-1.amazonaws.com
   OWNER: jimjrxieb
   AWS_REGION: us-east-1
+  CONFTEST_VERSION: "0.56.0"
 
 jobs:
+  # ─── OPA Policy Gate — blocks builds if manifests violate policies ─
+  policy-gate:
+    name: "CM-6: Conftest Policy Gate"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Conftest
+        run: |
+          wget -q "https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz"
+          tar xzf "conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz"
+          sudo mv conftest /usr/local/bin/
+
+      - name: Validate K8s manifests against OPA policies
+        run: |
+          echo "=== Testing base manifests ==="
+          conftest test \
+            infrastructure/anthra-api/base/*.yaml \
+            infrastructure/anthra-ui/base/*.yaml \
+            infrastructure/anthra-log-ingest/base/*.yaml \
+            infrastructure/anthra-db/base/*.yaml \
+            infrastructure/*.yaml \
+            --policy policies/conftest \
+            --all-namespaces \
+            --output stdout
+
+      - name: Validate overlay manifests
+        run: |
+          for env in dev staging; do
+            for svc in anthra-api anthra-ui anthra-log-ingest anthra-db; do
+              OVERLAY="infrastructure/${svc}/overlays/${env}"
+              if [ -d "$OVERLAY" ] && ls "$OVERLAY"/*.yaml &>/dev/null; then
+                echo "=== Testing ${svc}/${env} ==="
+                conftest test "$OVERLAY"/*.yaml \
+                  --policy policies/conftest \
+                  --all-namespaces \
+                  --output stdout
+              fi
+            done
+          done
+
   # ─── Detect which services changed ─────────────────────────────────
   changes:
     name: Detect changes
@@ -45,7 +89,7 @@ jobs:
   # ─── Build & Push images (GHCR + ECR) ──────────────────────────────
   build-api:
     name: Build anthra-api
-    needs: changes
+    needs: [policy-gate, changes]
     if: needs.changes.outputs.api == 'true'
     runs-on: ubuntu-latest
     outputs:
@@ -79,7 +123,7 @@ jobs:
 
   build-services:
     name: Build anthra-log-ingest
-    needs: changes
+    needs: [policy-gate, changes]
     if: needs.changes.outputs.services == 'true'
     runs-on: ubuntu-latest
     outputs:
@@ -113,7 +157,7 @@ jobs:
 
   build-ui:
     name: Build anthra-ui
-    needs: changes
+    needs: [policy-gate, changes]
     if: needs.changes.outputs.ui == 'true'
     runs-on: ubuntu-latest
     outputs:

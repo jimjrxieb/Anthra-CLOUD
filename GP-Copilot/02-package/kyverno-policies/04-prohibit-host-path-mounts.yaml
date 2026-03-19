@@ -1,0 +1,48 @@
+# NIST 800-53 AC-6: LEAST PRIVILEGE
+# Purpose: Prohibit hostPath mounts in pods to prevent host-level compromise.
+# FedRAMP Moderate requires strict isolation between containers and the host.
+
+---
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8sprohibithostpath
+  annotations:
+    metadata.gatekeeper.sh/title: "Prohibit hostPath Mounts"
+    metadata.gatekeeper.sh/version: 1.0.0
+    description: >-
+      Prohibits all hostPath mounts to ensure containers remain isolated
+      from the underlying node's filesystem.
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sProhibitHostPath
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8sprohibithostpath
+
+        violation[{"msg": msg}] {
+          volume := input.review.object.spec.template.spec.volumes[_]
+          has_field(volume, "hostPath")
+          msg := sprintf("Pod %v uses prohibited hostPath mount for volume '%v'. Use emptyDir or PersistentVolumeClaim (NIST AC-6).", [input.review.object.metadata.name, volume.name])
+        }
+
+        has_field(obj, field) {
+          obj[field]
+        }
+
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sProhibitHostPath
+metadata:
+  name: prohibit-host-path
+spec:
+  enforcementAction: deny
+  match:
+    kinds:
+      - apiGroups: ["apps", ""]
+        kinds: ["Deployment", "StatefulSet", "DaemonSet", "Pod"]
+    namespaces:
+      - anthra

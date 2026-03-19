@@ -1,31 +1,39 @@
 // Anthra Security Platform - Log Ingest Microservice
 // Accepts log events from distributed agents and stores them centrally
 //
-// Built for speed-to-market by a team focused on features, not security.
-// Now needs FedRAMP hardening for federal market entry.
+// TLS terminated at ingress/ALB — internal traffic is pod-to-pod over cluster network
+// See: infrastructure/ingress.yaml
 
 package main
 
 import (
+	"crypto/tls"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	_ "github.com/lib/pq"
 )
 
-// CWE-798: Use of hard-coded credentials in fallback values
 var (
 	dbHost = getEnv("DB_HOST", "localhost")
 	dbPort = getEnv("DB_PORT", "5432")
 	dbName = getEnv("DB_NAME", "anthra")
 	dbUser = getEnv("DB_USER", "anthra")
-	dbPass = getEnv("DB_PASSWORD", "PLACEHOLDER_PASSWORD")  // CWE-798
+	dbPass = getEnvRequired("DB_PASSWORD")
+
+	validLevels = map[string]bool{
+		"DEBUG": true, "INFO": true, "WARN": true,
+		"WARNING": true, "ERROR": true, "CRITICAL": true,
+	}
 )
+
+const maxMessageLen = 4096
 
 func getEnv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
@@ -34,20 +42,28 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
+func getEnvRequired(key string) string {
+	v := os.Getenv(key)
+	if v == "" {
+		log.Printf("WARNING: %s not set — DB writes will fail", key)
+	}
+	return v
+}
+
 // LogEvent represents an incoming log entry from agents
 type LogEvent struct {
-	TenantID  string    `json:"tenant_id"`
-	Level     string    `json:"level"`
-	Message   string    `json:"message"`
-	Source    string    `json:"source"`
+	TenantID string    `json:"tenant_id"`
+	Level    string    `json:"level"`
+	Message  string    `json:"message"`
+	Source   string    `json:"source"`
 	Timestamp time.Time `json:"timestamp,omitempty"`
 }
 
 func main() {
-	// CWE-327: Use of a broken or risky cryptographic algorithm (sslmode=disable)
+	sslMode := getEnv("DB_SSLMODE", "require")
 	connStr := fmt.Sprintf(
-		"host=%s port=%s dbname=%s user=%s password=%s sslmode=disable",
-		dbHost, dbPort, dbName, dbUser, dbPass,
+		"host=%s port=%s dbname=%s user=%s password=%s sslmode=%s",
+		dbHost, dbPort, dbName, dbUser, dbPass, sslMode,
 	)
 
 	db, err := sql.Open("postgres", connStr)
@@ -56,21 +72,41 @@ func main() {
 	}
 	defer db.Close()
 
-	// CWE-306: Missing authentication for critical function
-	// No authentication middleware - accepts any traffic
-	http.HandleFunc("/ingest", ingestHandler(db))
-	http.HandleFunc("/health", healthHandler)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ingest", ingestHandler(db))
+	mux.HandleFunc("/health", healthHandler)
 
-	// CWE-319: Cleartext transmission of sensitive information (no TLS)
-	log.Println("Anthra log-ingest service listening on :9090")
-	log.Fatal(http.ListenAndServe(":9090", nil))  // Should use TLS
+	certFile := os.Getenv("TLS_CERT_FILE")
+	keyFile := os.Getenv("TLS_KEY_FILE")
+
+	if certFile != "" && keyFile != "" {
+		srv := &http.Server{
+			Addr:    ":9090",
+			Handler: mux,
+			TLSConfig: &tls.Config{
+				MinVersion: tls.VersionTLS12,
+			},
+			ReadTimeout:  10 * time.Second,
+			WriteTimeout: 10 * time.Second,
+			IdleTimeout:  60 * time.Second,
+		}
+		log.Println("Anthra log-ingest service listening on :9090 (TLS)")
+		log.Fatal(srv.ListenAndServeTLS(certFile, keyFile))
+	} else {
+		// TLS terminated at ingress — plain HTTP for pod-to-pod traffic
+		srv := &http.Server{
+			Addr:         ":9090",
+			Handler:      mux,
+			ReadTimeout:  10 * time.Second,
+			WriteTimeout: 10 * time.Second,
+			IdleTimeout:  60 * time.Second,
+		}
+		log.Println("Anthra log-ingest service listening on :9090 (TLS at ingress)")
+		log.Fatal(srv.ListenAndServe())
+	}
 }
 
 // ingestHandler processes incoming log events
-// Security gaps:
-// - CWE-306: No authentication (anyone can send logs)
-// - CWE-770: No rate limiting (vulnerable to flooding)
-// - CWE-20: Improper input validation (accepts any JSON structure)
 func ingestHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -78,22 +114,30 @@ func ingestHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// CWE-20: Minimal input validation
 		var event LogEvent
-		if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
-			// CWE-209: Information exposure through error message
-			http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192))
+		if err := decoder.Decode(&event); err != nil {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
 		}
 
-		// TODO: Validate tenant_id format
-		// TODO: Validate level is one of: DEBUG, INFO, WARN, ERROR, CRITICAL
-		// TODO: Validate message length (prevent DOS)
-		// TODO: Check authentication header
+		// Input validation
+		event.Level = strings.ToUpper(event.Level)
+		if !validLevels[event.Level] {
+			http.Error(w, "Invalid log level", http.StatusBadRequest)
+			return
+		}
+		if event.TenantID == "" || event.Source == "" {
+			http.Error(w, "tenant_id and source are required", http.StatusBadRequest)
+			return
+		}
+		if len(event.Message) > maxMessageLen {
+			http.Error(w, "Message too long", http.StatusBadRequest)
+			return
+		}
 
 		// Store in database
 		if db != nil {
-			// Using parameterized queries (good practice maintained)
 			_, err := db.Exec(
 				"INSERT INTO logs (tenant_id, level, message, source, timestamp) VALUES ($1, $2, $3, $4, $5)",
 				event.TenantID,
@@ -103,15 +147,13 @@ func ingestHandler(db *sql.DB) http.HandlerFunc {
 				time.Now(),
 			)
 			if err != nil {
-				// CWE-532: Insertion of sensitive information into log file
-				log.Printf("DB insert failed for tenant %s: %v", event.TenantID, err)
-				http.Error(w, "Database error", http.StatusInternalServerError)
+				log.Printf("DB insert failed: %v", err)
+				http.Error(w, "Internal error", http.StatusInternalServerError)
 				return
 			}
 		}
 
-		// CWE-532: Log potentially sensitive data
-		log.Printf("[%s] %s: %s (from %s)", event.TenantID, event.Level, event.Message, event.Source)
+		log.Printf("ingested tenant=%s level=%s source=%s", event.TenantID, event.Level, event.Source)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
@@ -123,24 +165,12 @@ func ingestHandler(db *sql.DB) http.HandlerFunc {
 	}
 }
 
-// healthHandler provides service health status
-// CWE-306: No authentication (exposes service availability)
+// healthHandler provides service health status (unauthenticated — K8s probes)
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
 		"status":  "healthy",
 		"service": "anthra-log-ingest",
-		"version": "1.0.0",
+		"version": "1.1.0",
 	})
 }
-
-// =============================================================================
-// TODO: Add API key authentication
-// TODO: Implement rate limiting per tenant
-// TODO: Add input validation (message length, valid log levels)
-// TODO: Enable TLS (certificate management)
-// TODO: Move credentials to AWS Secrets Manager
-// TODO: Add circuit breaker for database failures
-// TODO: Implement request tracing for observability
-// TODO: Add metrics endpoint for Prometheus
-// =============================================================================

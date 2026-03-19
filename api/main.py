@@ -1,23 +1,26 @@
 """
 Anthra Security Platform API
 Multi-tenant security monitoring and log aggregation SaaS
-
-Built for speed-to-market by a development team focused on features.
-Now needs FedRAMP Moderate hardening to enter federal market.
 """
 
-import hashlib
+import logging
 import os
+import re
+import secrets
 import sqlite3
 import tempfile
-from datetime import datetime
+import time
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+import bcrypt
+import jwt
 import psycopg2
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # =============================================================================
 # Configuration
@@ -28,19 +31,63 @@ DB_NAME = os.getenv("DB_NAME", "anthra")
 DB_USER = os.getenv("DB_USER", "anthra")
 DB_PASSWORD = os.getenv("DB_PASSWORD")  # Required — no fallback
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
-DEBUG_MODE = os.getenv("DEBUG_MODE", "false").lower() == "true"
+JWT_SECRET = os.getenv("JWT_SECRET")  # Required in production
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRY_HOURS = int(os.getenv("JWT_EXPIRY_HOURS", "8"))
+
+# Generate a runtime secret if JWT_SECRET not set (dev only — logs a warning)
+if not JWT_SECRET:
+    JWT_SECRET = secrets.token_hex(32)
+    logging.warning("JWT_SECRET not set — using ephemeral key. Sessions won't survive restarts.")
+
+VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARN", "WARNING", "ERROR", "CRITICAL"}
+VALID_SEVERITIES = {"low", "medium", "high", "critical"}
+MAX_LOGS_LIMIT = 500
+
+# =============================================================================
+# Structured Logging (no sensitive data)
+# =============================================================================
+logging.basicConfig(
+    format='{"time":"%(asctime)s","level":"%(levelname)s","msg":"%(message)s"}',
+    level=logging.INFO,
+)
+logger = logging.getLogger("anthra-api")
+
+# =============================================================================
+# Rate Limiter — in-memory, per-IP
+# =============================================================================
+_rate_store: dict[str, list[float]] = defaultdict(list)
+RATE_LIMIT_LOGIN = 5       # max attempts
+RATE_LIMIT_WINDOW = 300    # per 5 minutes
+RATE_LIMIT_GENERAL = 100   # general endpoints
+RATE_LIMIT_GENERAL_WINDOW = 60
+
+
+def _check_rate_limit(key: str, max_attempts: int, window_seconds: int) -> bool:
+    """Return True if rate limit exceeded."""
+    now = time.monotonic()
+    attempts = _rate_store[key]
+    # Prune old entries
+    _rate_store[key] = [t for t in attempts if now - t < window_seconds]
+    if len(_rate_store[key]) >= max_attempts:
+        return True
+    _rate_store[key].append(now)
+    return False
+
 
 app = FastAPI(
     title="Anthra Security Platform",
-    version="1.1.0",
+    version="1.2.0",
     description="Cloud-native security monitoring and threat detection",
+    docs_url=None,    # Disable Swagger in production
+    redoc_url=None,   # Disable ReDoc in production
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origins=[o.strip() for o in ALLOWED_ORIGINS if o.strip()],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_methods=["GET", "POST"],
     allow_headers=["Authorization", "Content-Type"],
 )
 
@@ -58,9 +105,8 @@ def get_db():
             user=DB_USER,
             password=DB_PASSWORD,
         )
-    except Exception as e:
-        # Fallback to SQLite for local development
-        print(f"PostgreSQL connection failed: {e}, using SQLite fallback")
+    except Exception:
+        logger.warning("PostgreSQL unavailable — using SQLite fallback")
         db_path = os.path.join(tempfile.gettempdir(), "anthra.db")
         conn = sqlite3.connect(db_path)
         _init_sqlite(conn)
@@ -72,8 +118,8 @@ def _init_sqlite(conn):
     conn.execute("""
         CREATE TABLE IF NOT EXISTS logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            tenant_id TEXT,
-            level TEXT,
+            tenant_id TEXT NOT NULL,
+            level TEXT NOT NULL,
             message TEXT,
             source TEXT,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -82,8 +128,8 @@ def _init_sqlite(conn):
     conn.execute("""
         CREATE TABLE IF NOT EXISTS alerts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            tenant_id TEXT,
-            severity TEXT,
+            tenant_id TEXT NOT NULL,
+            severity TEXT NOT NULL,
             title TEXT,
             description TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -92,19 +138,20 @@ def _init_sqlite(conn):
     conn.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE,
-            password_hash TEXT,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
             email TEXT,
             role TEXT DEFAULT 'viewer',
-            tenant_id TEXT,
+            tenant_id TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    # Seed demo data
+    # Seed demo user with bcrypt hash
     try:
+        hashed = bcrypt.hashpw(b"Change-Me-1!", bcrypt.gensalt()).decode()
         conn.execute(
             "INSERT INTO users (username, password_hash, email, role, tenant_id) VALUES (?, ?, ?, ?, ?)",
-            ("admin", hashlib.sha256(b"admin123").hexdigest(), "admin@anthra.io", "admin", "tenant-1"),
+            ("admin", hashed, "admin@anthra.io", "admin", "tenant-1"),
         )
         for i in range(1, 4):
             conn.execute(
@@ -117,366 +164,322 @@ def _init_sqlite(conn):
 
 
 # =============================================================================
+# JWT Helpers
+# =============================================================================
+def _create_token(user_id: int, username: str, role: str, tenant_id: str) -> str:
+    payload = {
+        "sub": str(user_id),
+        "username": username,
+        "role": role,
+        "tenant_id": tenant_id,
+        "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRY_HOURS),
+        "iat": datetime.now(timezone.utc),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def _decode_token(token: str) -> dict:
+    try:
+        return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+
+# =============================================================================
+# Auth Dependency — extracts and validates JWT from Authorization header
+# =============================================================================
+async def require_auth(request: Request) -> dict:
+    """Dependency that enforces authentication on protected endpoints."""
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
+    token = auth_header[7:]
+    return _decode_token(token)
+
+
+# =============================================================================
 # Request/Response Models
 # =============================================================================
+PASSWORD_RE = re.compile(r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*\-]).{10,}$")
+
+
 class LoginRequest(BaseModel):
-    username: str
-    password: str
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=128)
+
+
+class RegisterRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=64, pattern=r"^[a-zA-Z0-9_\-]+$")
+    password: str = Field(min_length=10, max_length=128)
+    email: str = Field(max_length=254)
+    tenant_id: str = Field(min_length=1, max_length=64)
 
 
 class AlertRequest(BaseModel):
-    tenant_id: str
-    severity: str
-    title: str
-    description: str
+    severity: str = Field(min_length=1, max_length=16)
+    title: str = Field(min_length=1, max_length=256)
+    description: str = Field(max_length=4096)
 
 
 class LogRequest(BaseModel):
-    tenant_id: str
-    level: str
-    message: str
-    source: str
+    level: str = Field(min_length=1, max_length=16)
+    message: str = Field(max_length=4096)
+    source: str = Field(min_length=1, max_length=128)
 
 
 # =============================================================================
-# Health Check
+# Health Check (unauthenticated — needed for K8s probes)
 # =============================================================================
 @app.get("/api/health")
 def health_check():
-    """Basic health check endpoint."""
     return {
         "status": "healthy",
         "service": "anthra-api",
-        "version": "1.0.0",
-        "timestamp": datetime.utcnow().isoformat(),
+        "version": "1.2.0",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
 # =============================================================================
 # Authentication Endpoints
-# CWE-306: Missing authentication for critical function
-# CWE-307: Improper restriction of excessive authentication attempts
 # =============================================================================
 @app.post("/api/auth/login")
-async def login(request: LoginRequest):
-    """
-    User authentication endpoint.
+async def login(request: LoginRequest, req: Request):
+    client_ip = req.client.host if req.client else "unknown"
 
-    Security gaps:
-    - CWE-916: MD5 password hashing (weak, should use bcrypt/argon2)
-    - CWE-307: No rate limiting on login attempts
-    - CWE-532: Logging of sensitive data (passwords in logs)
-    """
+    # Rate limit: 5 login attempts per 5 minutes per IP
+    if _check_rate_limit(f"login:{client_ip}", RATE_LIMIT_LOGIN, RATE_LIMIT_WINDOW):
+        logger.warning("login rate-limited ip=%s", client_ip)
+        raise HTTPException(status_code=429, detail="Too many login attempts. Try again later.")
+
     conn = get_db()
     cur = conn.cursor()
-
-    password_hash = hashlib.sha256(request.password.encode()).hexdigest()
-
-    # Using parameterized queries (good practice maintained)
     cur.execute(
-        "SELECT id, username, email, role, tenant_id FROM users WHERE username = ? AND password_hash = ?",
-        (request.username, password_hash),
+        "SELECT id, username, password_hash, role, tenant_id FROM users WHERE username = ?",
+        (request.username,),
     )
     user = cur.fetchone()
     conn.close()
 
-    if user:
-        # CWE-532: Logging sensitive authentication data
-        print(f"Login successful: {request.username} from tenant {user[4]}")
-        return {
-            "status": "authenticated",
-            "user_id": user[0],
-            "username": user[1],
-            "email": user[2],
-            "role": user[3],
-            "tenant_id": user[4],
-        }
+    if not user:
+        # Constant-time comparison to avoid timing attacks
+        bcrypt.checkpw(b"dummy", bcrypt.hashpw(b"dummy", bcrypt.gensalt()))
+        logger.info("login failed user=%s reason=not_found", request.username)
+        return JSONResponse(status_code=401, content={"error": "Invalid credentials"})
 
-    # CWE-209: Information exposure through error message
-    return JSONResponse(
-        status_code=401,
-        content={"error": "Invalid username or password"},
-    )
+    stored_hash = user[2].encode() if isinstance(user[2], str) else user[2]
+    if not bcrypt.checkpw(request.password.encode(), stored_hash):
+        logger.info("login failed user=%s reason=bad_password", request.username)
+        return JSONResponse(status_code=401, content={"error": "Invalid credentials"})
+
+    token = _create_token(user[0], user[1], user[3], user[4])
+    logger.info("login success user=%s tenant=%s", user[1], user[4])
+
+    return {
+        "token": token,
+        "token_type": "bearer",
+        "user_id": user[0],
+        "username": user[1],
+        "role": user[3],
+        "tenant_id": user[4],
+    }
 
 
 @app.post("/api/auth/register")
-async def register(request: Request):
-    """
-    User registration endpoint.
+async def register(request: RegisterRequest, req: Request):
+    client_ip = req.client.host if req.client else "unknown"
 
-    Security gaps:
-    - No email verification
-    - No password complexity requirements
-    - MD5 hashing
-    """
-    body = await request.json()
-    username = body.get("username", "")
-    password = body.get("password", "")
-    email = body.get("email", "")
-    tenant_id = body.get("tenant_id", "tenant-1")
+    if _check_rate_limit(f"register:{client_ip}", 3, 600):
+        raise HTTPException(status_code=429, detail="Too many registration attempts.")
 
-    if not username or not password:
-        raise HTTPException(status_code=400, detail="Username and password required")
+    if not PASSWORD_RE.match(request.password):
+        raise HTTPException(
+            status_code=400,
+            detail="Password must be 10+ chars with uppercase, lowercase, digit, and special character.",
+        )
+
+    hashed = bcrypt.hashpw(request.password.encode(), bcrypt.gensalt()).decode()
 
     conn = get_db()
     cur = conn.cursor()
-
-    password_hash = hashlib.sha256(password.encode()).hexdigest()
-
     try:
         cur.execute(
             "INSERT INTO users (username, password_hash, email, tenant_id) VALUES (?, ?, ?, ?)",
-            (username, password_hash, email, tenant_id),
+            (request.username, hashed, request.email, request.tenant_id),
         )
         conn.commit()
+    except Exception:
         conn.close()
-        return {"status": "registered", "username": username}
-    except Exception as e:
-        conn.close()
-        # CWE-209: Error message might leak database structure
-        raise HTTPException(status_code=400, detail=f"Registration failed: {str(e)}")
+        raise HTTPException(status_code=409, detail="Username already exists")
+    conn.close()
+
+    logger.info("user registered user=%s tenant=%s", request.username, request.tenant_id)
+    return {"status": "registered", "username": request.username}
 
 
 # =============================================================================
-# Log Management
-# CWE-306: Missing authentication - no auth middleware
+# Log Management — all endpoints require auth + enforce tenant isolation
 # =============================================================================
 @app.get("/api/logs")
-async def get_logs(tenant_id: Optional[str] = None, limit: int = 100):
-    """
-    Retrieve logs for a tenant.
+async def get_logs(
+    claims: dict = Depends(require_auth),
+    limit: int = 100,
+):
+    tenant_id = claims["tenant_id"]
+    limit = min(limit, MAX_LOGS_LIMIT)
 
-    Security gaps:
-    - CWE-306: No authentication check (anyone can query)
-    - CWE-284: Missing tenant isolation check
-    - No pagination limit enforcement
-    """
     conn = get_db()
     cur = conn.cursor()
-
-    if tenant_id:
-        # Using parameterized queries (good)
-        cur.execute(
-            "SELECT * FROM logs WHERE tenant_id = ? ORDER BY timestamp DESC LIMIT ?",
-            (tenant_id, limit),
-        )
-    else:
-        # CWE-284: Returns logs from ALL tenants without auth
-        cur.execute("SELECT * FROM logs ORDER BY timestamp DESC LIMIT ?", (limit,))
-
+    cur.execute(
+        "SELECT id, tenant_id, level, message, source, timestamp FROM logs "
+        "WHERE tenant_id = ? ORDER BY timestamp DESC LIMIT ?",
+        (tenant_id, limit),
+    )
     rows = cur.fetchall()
     conn.close()
 
-    logs = []
-    for row in rows:
-        logs.append({
-            "id": row[0],
-            "tenant_id": row[1],
-            "level": row[2],
-            "message": row[3],
-            "source": row[4],
-            "timestamp": row[5],
-        })
-
+    logs = [
+        {"id": r[0], "tenant_id": r[1], "level": r[2], "message": r[3], "source": r[4], "timestamp": str(r[5])}
+        for r in rows
+    ]
     return {"logs": logs, "count": len(logs)}
 
 
 @app.post("/api/logs")
-async def create_log(log: LogRequest):
-    """
-    Create a new log entry.
+async def create_log(
+    log: LogRequest,
+    req: Request,
+    claims: dict = Depends(require_auth),
+):
+    tenant_id = claims["tenant_id"]
+    client_ip = req.client.host if req.client else "unknown"
 
-    Security gaps:
-    - CWE-306: No authentication
-    - CWE-770: No rate limiting (could flood database)
-    """
+    if _check_rate_limit(f"log:{tenant_id}", RATE_LIMIT_GENERAL, RATE_LIMIT_GENERAL_WINDOW):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
+
+    level_upper = log.level.upper()
+    if level_upper not in VALID_LOG_LEVELS:
+        raise HTTPException(status_code=400, detail=f"Invalid log level. Must be one of: {', '.join(sorted(VALID_LOG_LEVELS))}")
+
     conn = get_db()
     cur = conn.cursor()
-
     cur.execute(
         "INSERT INTO logs (tenant_id, level, message, source) VALUES (?, ?, ?, ?)",
-        (log.tenant_id, log.level, log.message, log.source),
+        (tenant_id, level_upper, log.message, log.source),
     )
     conn.commit()
     conn.close()
 
-    return {"status": "created", "tenant_id": log.tenant_id}
+    return {"status": "created", "tenant_id": tenant_id}
 
 
 # =============================================================================
 # Alert Management
 # =============================================================================
 @app.get("/api/alerts")
-async def get_alerts(tenant_id: Optional[str] = None):
-    """
-    Retrieve security alerts.
+async def get_alerts(claims: dict = Depends(require_auth)):
+    tenant_id = claims["tenant_id"]
 
-    Security gaps:
-    - CWE-306: No authentication
-    - CWE-284: No tenant isolation
-    """
     conn = get_db()
     cur = conn.cursor()
-
-    if tenant_id:
-        cur.execute(
-            "SELECT * FROM alerts WHERE tenant_id = ? ORDER BY created_at DESC",
-            (tenant_id,),
-        )
-    else:
-        cur.execute("SELECT * FROM alerts ORDER BY created_at DESC")
-
+    cur.execute(
+        "SELECT id, tenant_id, severity, title, description, created_at FROM alerts "
+        "WHERE tenant_id = ? ORDER BY created_at DESC",
+        (tenant_id,),
+    )
     rows = cur.fetchall()
     conn.close()
 
-    alerts = []
-    for row in rows:
-        alerts.append({
-            "id": row[0],
-            "tenant_id": row[1],
-            "severity": row[2],
-            "title": row[3],
-            "description": row[4],
-            "created_at": row[5],
-        })
-
+    alerts = [
+        {"id": r[0], "tenant_id": r[1], "severity": r[2], "title": r[3], "description": r[4], "created_at": str(r[5])}
+        for r in rows
+    ]
     return {"alerts": alerts, "count": len(alerts)}
 
 
 @app.post("/api/alerts")
-async def create_alert(alert: AlertRequest):
-    """
-    Create a new security alert.
+async def create_alert(
+    alert: AlertRequest,
+    claims: dict = Depends(require_auth),
+):
+    tenant_id = claims["tenant_id"]
 
-    Security gaps:
-    - CWE-306: No authentication
-    - No input validation on severity levels
-    """
+    severity_lower = alert.severity.lower()
+    if severity_lower not in VALID_SEVERITIES:
+        raise HTTPException(status_code=400, detail=f"Invalid severity. Must be one of: {', '.join(sorted(VALID_SEVERITIES))}")
+
     conn = get_db()
     cur = conn.cursor()
-
     cur.execute(
         "INSERT INTO alerts (tenant_id, severity, title, description) VALUES (?, ?, ?, ?)",
-        (alert.tenant_id, alert.severity, alert.title, alert.description),
+        (tenant_id, severity_lower, alert.title, alert.description),
     )
     conn.commit()
     alert_id = cur.lastrowid
     conn.close()
 
+    logger.info("alert created tenant=%s severity=%s", tenant_id, severity_lower)
     return {"status": "created", "alert_id": alert_id}
 
 
 # =============================================================================
-# Search Endpoint
+# Search — authenticated, tenant-scoped
 # =============================================================================
 @app.get("/api/search")
-async def search_logs(q: str = "", tenant_id: Optional[str] = None):
-    """
-    Search logs by keyword.
+async def search_logs(
+    q: str = "",
+    claims: dict = Depends(require_auth),
+):
+    tenant_id = claims["tenant_id"]
 
-    Security gaps:
-    - CWE-306: No authentication
-    - Basic string matching (not full-text search)
-    """
+    if len(q) > 256:
+        raise HTTPException(status_code=400, detail="Query too long")
+
     conn = get_db()
     cur = conn.cursor()
-
-    if tenant_id:
-        # Using LIKE with parameterized query (safe from SQLi)
-        cur.execute(
-            "SELECT * FROM logs WHERE tenant_id = ? AND message LIKE ? LIMIT 100",
-            (tenant_id, f"%{q}%"),
-        )
-    else:
-        cur.execute(
-            "SELECT * FROM logs WHERE message LIKE ? LIMIT 100",
-            (f"%{q}%",),
-        )
-
+    cur.execute(
+        "SELECT id, tenant_id, level, message, source, timestamp FROM logs "
+        "WHERE tenant_id = ? AND message LIKE ? LIMIT 100",
+        (tenant_id, f"%{q}%"),
+    )
     rows = cur.fetchall()
     conn.close()
 
-    results = []
-    for row in rows:
-        results.append({
-            "id": row[0],
-            "tenant_id": row[1],
-            "level": row[2],
-            "message": row[3],
-            "source": row[4],
-            "timestamp": row[5],
-        })
-
+    results = [
+        {"id": r[0], "tenant_id": r[1], "level": r[2], "message": r[3], "source": r[4], "timestamp": str(r[5])}
+        for r in rows
+    ]
     return {"results": results, "query": q, "count": len(results)}
 
 
 # =============================================================================
-# Debug Endpoint (Development Only)
-# CWE-489: Debug features enabled in production
-# CWE-215: Information exposure through debug information
-# =============================================================================
-@app.get("/api/debug")
-async def debug_info():
-    """Debug endpoint — only available when DEBUG_MODE=true."""
-    if not DEBUG_MODE:
-        raise HTTPException(status_code=404, detail="Not found")
-    return {
-        "status": "debug_mode_active",
-        "environment": {
-            "DB_HOST": DB_HOST,
-            "DB_NAME": DB_NAME,
-            "DB_USER": DB_USER,
-        },
-        "config": {
-            "cors_origins": ALLOWED_ORIGINS,
-        },
-    }
-
-
-# =============================================================================
-# Stats Endpoint
+# Stats — authenticated, tenant-scoped (admins see all)
 # =============================================================================
 @app.get("/api/stats")
-async def get_stats():
-    """
-    System statistics endpoint.
+async def get_stats(claims: dict = Depends(require_auth)):
+    tenant_id = claims["tenant_id"]
+    role = claims.get("role", "viewer")
 
-    Security gaps:
-    - CWE-306: No authentication
-    - Exposes tenant counts (information disclosure)
-    """
     conn = get_db()
     cur = conn.cursor()
 
-    cur.execute("SELECT COUNT(*) FROM logs")
-    log_count = cur.fetchone()[0]
-
-    cur.execute("SELECT COUNT(*) FROM alerts")
-    alert_count = cur.fetchone()[0]
-
-    cur.execute("SELECT COUNT(*) FROM users")
-    user_count = cur.fetchone()[0]
-
-    cur.execute("SELECT COUNT(DISTINCT tenant_id) FROM logs")
-    tenant_count = cur.fetchone()[0]
+    if role == "admin":
+        cur.execute("SELECT COUNT(*) FROM logs WHERE tenant_id = ?", (tenant_id,))
+        log_count = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM alerts WHERE tenant_id = ?", (tenant_id,))
+        alert_count = cur.fetchone()[0]
+    else:
+        cur.execute("SELECT COUNT(*) FROM logs WHERE tenant_id = ?", (tenant_id,))
+        log_count = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM alerts WHERE tenant_id = ?", (tenant_id,))
+        alert_count = cur.fetchone()[0]
 
     conn.close()
 
     return {
         "total_logs": log_count,
         "total_alerts": alert_count,
-        "total_users": user_count,
-        "active_tenants": tenant_count,
+        "tenant_id": tenant_id,
     }
-
-
-# =============================================================================
-# TODO: Add authentication middleware across all endpoints
-# TODO: Implement rate limiting per tenant
-# TODO: Add CSRF protection for state-changing operations
-# TODO: Move credentials to AWS Secrets Manager
-# TODO: Replace MD5 with bcrypt/argon2 for password hashing
-# TODO: Add request validation and sanitization
-# TODO: Implement proper audit logging
-# TODO: Add TLS/mTLS for service-to-service communication
-# =============================================================================

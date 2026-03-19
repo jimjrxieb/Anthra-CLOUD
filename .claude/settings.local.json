@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(aws:*)",
+      "Bash(eksctl version:*)",
+      "Bash(terraform init:*)",
+      "Bash(wc:*)",
+      "Bash(python3:*)",
+      "Bash(kubectl get:*)",
+      "Bash(helm list:*)",
+      "Bash(helm uninstall:*)",
+      "Bash(kubectl delete:*)",
+      "Bash(kubectl create:*)",
+      "Bash(kubectl apply:*)",
+      "Bash(kubectl rollout:*)"
+    ]
+  }
+}

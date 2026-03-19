@@ -1,0 +1,102 @@
+# OPA Gatekeeper ConstraintTemplate + Constraint
+# Purpose: PREVENT findings like 7557622, 6852306 from happening
+# Enforcement: Admission control (blocks kubectl apply)
+# Related JSA Findings: All securityContext issues
+
+---
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequiresecuritycontext
+  annotations:
+    metadata.gatekeeper.sh/title: "Require Security Context"
+    metadata.gatekeeper.sh/version: 1.0.0
+    description: >-
+      Requires all containers to have a securityContext with
+      runAsNonRoot: true, allowPrivilegeEscalation: false,
+      and capabilities dropped.
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sRequireSecurityContext
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8srequiresecuritycontext
+
+        violation[{"msg": msg}] {
+          container := input_containers[_]
+          not container.securityContext.runAsNonRoot
+          msg := sprintf("Container %v must set securityContext.runAsNonRoot: true", [container.name])
+        }
+
+        violation[{"msg": msg}] {
+          container := input_containers[_]
+          not has_field(container.securityContext, "allowPrivilegeEscalation")
+          msg := sprintf("Container %v must set securityContext.allowPrivilegeEscalation: false", [container.name])
+        }
+
+        violation[{"msg": msg}] {
+          container := input_containers[_]
+          container.securityContext.allowPrivilegeEscalation == true
+          msg := sprintf("Container %v must set securityContext.allowPrivilegeEscalation: false", [container.name])
+        }
+
+        violation[{"msg": msg}] {
+          container := input_containers[_]
+          not has_field(container.securityContext.capabilities, "drop")
+          msg := sprintf("Container %v must drop capabilities (securityContext.capabilities.drop: ['ALL'])", [container.name])
+        }
+
+        violation[{"msg": msg}] {
+          container := input_containers[_]
+          has_field(container.securityContext.capabilities, "drop")
+          not "ALL" in container.securityContext.capabilities.drop
+          msg := sprintf("Container %v must drop ALL capabilities", [container.name])
+        }
+
+        input_containers[c] {
+          c := input.review.object.spec.containers[_]
+        }
+
+        input_containers[c] {
+          c := input.review.object.spec.initContainers[_]
+        }
+
+        has_field(obj, field) {
+          obj[field]
+        }
+
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequireSecurityContext
+metadata:
+  name: require-security-context
+spec:
+  enforcementAction: deny  # Change to 'dryrun' for testing
+  match:
+    kinds:
+      - apiGroups: ["apps", ""]
+        kinds: ["Deployment", "StatefulSet", "DaemonSet", "Pod"]
+    namespaces:
+      - anthra  # Anthra Security Platform namespace
+
+---
+# Test this constraint:
+# kubectl apply -f require-security-context.yaml
+# kubectl apply -f ../infrastructure/api-deployment.yaml  # Should FAIL
+#
+# Expected Error:
+# Error from server (Forbidden): error when creating "api-deployment.yaml":
+# admission webhook "validation.gatekeeper.sh" denied the request:
+# [require-security-context] Container api must set securityContext.runAsNonRoot: true
+
+---
+# NIST 800-53 Control Mapping:
+# - AC-6: Least Privilege
+# - CM-2: Baseline Configuration
+# - CM-7: Least Functionality
+#
+# FedRAMP Moderate Requirement:
+# All containers MUST run as non-root with minimal capabilities.

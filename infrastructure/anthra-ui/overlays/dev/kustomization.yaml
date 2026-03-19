@@ -49,5 +49,5 @@ patches:
     kind: ResourceQuota
 images:
 - name: anthra/ui
-  newName: 026090554981.dkr.ecr.us-east-1.amazonaws.com/anthra-ui
+  newName: ghcr.io/jimjrxieb/anthra-ui
   newTag: sha-9934ecd

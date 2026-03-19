@@ -82,14 +82,17 @@ jobs:
           tar xzf "conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz"
           sudo mv conftest /usr/local/bin/
 
-      - name: Validate OPA policies parse correctly
+      - name: Validate K8s manifests against local OPA policies
         run: |
-          conftest verify --policy GP-Copilot/policies/opa/
-
-      - name: Run OPA policies against any K8s manifests
-        run: |
-          chmod +x GP-Copilot/jsa-devsec/conftest-runner.sh
-          ./GP-Copilot/jsa-devsec/conftest-runner.sh infrastructure/ || true
+          conftest test \
+            infrastructure/anthra-api/base/*.yaml \
+            infrastructure/anthra-ui/base/*.yaml \
+            infrastructure/anthra-log-ingest/base/*.yaml \
+            infrastructure/anthra-db/base/*.yaml \
+            infrastructure/*.yaml \
+            --policy policies/conftest \
+            --all-namespaces \
+            --output stdout
 
   kyverno-validate:
     name: "AC-6: Kyverno Policy Lint"
