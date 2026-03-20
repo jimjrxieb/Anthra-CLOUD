@@ -1,0 +1,131 @@
+apiVersion: scaffolder.backstage.io/v1beta3
+kind: Template
+metadata:
+  name: secure-microservice
+  title: Secure Microservice
+  description: >-
+    Scaffold a production-ready microservice with hardened Kubernetes manifests,
+    CI/CD pipeline, and External Secrets integration. Follows CKS best practices.
+  tags:
+    - kubernetes
+    - security
+    - golden-path
+    - recommended
+spec:
+  owner: platform-team
+  type: service
+
+  parameters:
+    - title: Service Details
+      required:
+        - appName
+        - teamName
+        - description
+      properties:
+        appName:
+          title: Application Name
+          type: string
+          description: "Lowercase, no spaces (e.g. payments-api)"
+          pattern: "^[a-z][a-z0-9-]*$"
+        teamName:
+          title: Team Name
+          type: string
+          description: "Your team (maps to RBAC group team-<name>)"
+        description:
+          title: Description
+          type: string
+          description: "What does this service do?"
+
+    - title: Technical Details
+      required:
+        - language
+        - port
+      properties:
+        language:
+          title: Language
+          type: string
+          enum: ["python", "go", "typescript", "java"]
+          default: "python"
+        port:
+          title: Container Port
+          type: integer
+          default: 8080
+        healthPath:
+          title: Health Check Path
+          type: string
+          default: "/health"
+
+    - title: Infrastructure
+      properties:
+        environment:
+          title: Initial Environment
+          type: string
+          enum: ["dev", "staging", "prod"]
+          default: "dev"
+        resourceTier:
+          title: Resource Tier
+          type: string
+          enum: ["small", "medium", "large"]
+          default: "small"
+        enableExternalSecrets:
+          title: Enable External Secrets
+          type: boolean
+          default: true
+        enableGatewayApi:
+          title: Create HTTPRoute
+          type: boolean
+          default: false
+
+    - title: Repository
+      required:
+        - repoUrl
+      properties:
+        repoUrl:
+          title: Repository Location
+          type: string
+          ui:field: RepoUrlPicker
+          ui:options:
+            allowedHosts:
+              - github.com
+
+  steps:
+    # 1. Scaffold code from skeleton
+    - id: fetch-skeleton
+      name: Fetch Skeleton
+      action: fetch:template
+      input:
+        url: ./skeleton
+        values:
+          appName: ${{ parameters.appName }}
+          teamName: ${{ parameters.teamName }}
+          description: ${{ parameters.description }}
+          language: ${{ parameters.language }}
+          port: ${{ parameters.port }}
+          healthPath: ${{ parameters.healthPath }}
+
+    # 2. Create GitHub repo
+    - id: publish
+      name: Create Repository
+      action: publish:github
+      input:
+        allowedHosts: ["github.com"]
+        repoUrl: ${{ parameters.repoUrl }}
+        description: ${{ parameters.description }}
+        defaultBranch: main
+        repoVisibility: private
+
+    # 3. Register in Backstage catalog
+    - id: register
+      name: Register in Catalog
+      action: catalog:register
+      input:
+        repoContentsUrl: ${{ steps.publish.output.repoContentsUrl }}
+        catalogInfoPath: /catalog-info.yaml
+
+  output:
+    links:
+      - title: Repository
+        url: ${{ steps.publish.output.remoteUrl }}
+      - title: Open in catalog
+        icon: catalog
+        entityRef: ${{ steps.register.output.entityRef }}
