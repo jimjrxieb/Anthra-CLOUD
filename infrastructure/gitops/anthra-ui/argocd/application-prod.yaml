@@ -1,0 +1,48 @@
+# ArgoCD Application — watches the manifests repo and auto-syncs to cluster
+# This file gets applied once per app per environment.
+#
+# ArgoCD sees a change in the manifests repo (e.g. new image tag)
+# → syncs the Kustomize overlay to the cluster
+# → Kyverno/Gatekeeper admission control validates the manifests
+# → pods roll out with zero-downtime rolling update
+# → Falco watches runtime behavior
+#
+# You never run kubectl apply manually in production.
+# ArgoCD does it for you, every time, consistently.
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: anthra-ui-prod
+  namespace: argocd
+  labels:
+    app: anthra-ui
+    env: prod
+    managed-by: gp-copilot
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/jimjrxieb/Anthra-CLOUD.git
+    targetRevision: HEAD
+    path: infrastructure/gitops/anthra-ui/overlays/prod
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: anthra
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+    retry:
+      limit: 3
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

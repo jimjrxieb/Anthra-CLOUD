@@ -1,0 +1,123 @@
+# ============================================================================
+# OPA GATEKEEPER CONSTRAINT TEMPLATES — Anthra-CLOUD (FedRAMP Moderate)
+# ============================================================================
+# Reusable templates for Kubernetes admission control policies.
+# FedRAMP Moderate compliance enforcement at runtime.
+#
+# Deploy with: kubectl apply -f constraint-templates.yaml
+# Wait for CRDs to register, then apply constraints.yaml
+# ============================================================================
+
+---
+# Constraint Template: Require Non-Root Containers
+# NIST AC-6(10): Prevent non-privileged users from executing privileged functions
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequirenonroot
+  annotations:
+    description: "Enforces runAsNonRoot in pod security context"
+    nist-800-53: "AC-6(10), CM-6"
+    fedramp: "moderate"
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sRequireNonRoot
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8srequirenonroot
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          not container.securityContext.runAsNonRoot
+          msg := sprintf("Container %v must set runAsNonRoot to true (NIST AC-6)", [container.name])
+        }
+
+---
+# Constraint Template: Block Privileged Containers
+# NIST AC-6: Least privilege — no container should run privileged
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8sblockprivileged
+  annotations:
+    description: "Blocks privileged containers"
+    nist-800-53: "AC-6, CM-6"
+    fedramp: "moderate"
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sBlockPrivileged
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8sblockprivileged
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          container.securityContext.privileged == true
+          msg := sprintf("Privileged container %v not allowed (NIST AC-6)", [container.name])
+        }
+
+---
+# Constraint Template: Require Resource Limits
+# NIST SC-5: Denial-of-service protection via resource boundaries
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequireresourcelimits
+  annotations:
+    description: "Requires CPU and memory limits on all containers"
+    nist-800-53: "SC-5"
+    fedramp: "moderate"
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sRequireResourceLimits
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8srequireresourcelimits
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          not container.resources.limits.memory
+          msg := sprintf("Container %v must set memory limits (NIST SC-5)", [container.name])
+        }
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          not container.resources.limits.cpu
+          msg := sprintf("Container %v must set CPU limits (NIST SC-5)", [container.name])
+        }
+
+---
+# Constraint Template: Require Read-Only Root Filesystem
+# NIST SI-7: Software, firmware, and information integrity
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequirereadonlyrootfs
+  annotations:
+    description: "Requires read-only root filesystem"
+    nist-800-53: "SI-7"
+    fedramp: "moderate"
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sRequireReadOnlyRootFS
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8srequirereadonlyrootfs
+
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          not container.securityContext.readOnlyRootFilesystem
+          msg := sprintf("Container %v must use read-only root filesystem (NIST SI-7)", [container.name])
+        }

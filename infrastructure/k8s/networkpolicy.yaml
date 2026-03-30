@@ -1,0 +1,157 @@
+# NetworkPolicy — Default deny + explicit allow rules
+---
+# Default deny all ingress/egress
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: anthra
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+# API: allow ingress from ALB, egress to DB + DNS
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-api
+  namespace: anthra
+spec:
+  podSelector:
+    matchLabels:
+      app: anthra-api
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - port: 8080
+          protocol: TCP
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: anthra-db
+      ports:
+        - port: 5432
+          protocol: TCP
+    - to: # DNS
+        - namespaceSelector: {}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - to: # AWS APIs (Secrets Manager, S3, CloudWatch)
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - port: 443
+          protocol: TCP
+---
+# UI: allow ingress from ALB, egress to API + DNS
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ui
+  namespace: anthra
+spec:
+  podSelector:
+    matchLabels:
+      app: anthra-ui
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - port: 8080
+          protocol: TCP
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: anthra-api
+      ports:
+        - port: 8080
+          protocol: TCP
+    - to: # DNS
+        - namespaceSelector: {}
+      ports:
+        - port: 53
+          protocol: UDP
+---
+# DB: allow ingress from API + log-ingest only
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-db
+  namespace: anthra
+spec:
+  podSelector:
+    matchLabels:
+      app: anthra-db
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: anthra-api
+        - podSelector:
+            matchLabels:
+              app: anthra-log-ingest
+      ports:
+        - port: 5432
+          protocol: TCP
+  egress:
+    - to: # DNS
+        - namespaceSelector: {}
+      ports:
+        - port: 53
+          protocol: UDP
+---
+# Log Ingest: allow ingress from ALB, egress to DB + DNS + AWS
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-log-ingest
+  namespace: anthra
+spec:
+  podSelector:
+    matchLabels:
+      app: anthra-log-ingest
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - port: 9090
+          protocol: TCP
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: anthra-db
+      ports:
+        - port: 5432
+          protocol: TCP
+    - to: # DNS
+        - namespaceSelector: {}
+      ports:
+        - port: 53
+          protocol: UDP
+    - to: # AWS APIs
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - port: 443
+          protocol: TCP

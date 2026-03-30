@@ -76,7 +76,11 @@ trusted_registries := [
     "company.azurecr.io",
     "123456789.dkr.ecr.us-east-1.amazonaws.com",
     "registry.company.com",
-    "quay.io/company"
+    "quay.io/company",
+    "ghcr.io/jimjrxieb",
+    "anthra",
+    "postgres",
+    "docker.io/library/postgres"
 ]
 
 is_trusted_registry(image) {

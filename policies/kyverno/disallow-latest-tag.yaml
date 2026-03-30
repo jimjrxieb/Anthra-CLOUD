@@ -1,0 +1,32 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: anthra-disallow-latest-tag
+  annotations:
+    policies.kyverno.io/title: Disallow Latest Tag
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      The :latest tag is mutable and breaks reproducibility. FedRAMP Moderate
+      CM-2 requires baseline configurations and CM-3 requires change control.
+    gp-copilot/standard: "CIS-5.1.2, NIST CM-2, CM-3"
+    gp-copilot/fedramp: "moderate"
+spec:
+  validationFailureAction: Audit
+  background: true
+  rules:
+    - name: validate-image-tag
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - anthra
+      validate:
+        message: "Image tag ':latest' is not allowed. Use pinned version tags."
+        pattern:
+          spec:
+            containers:
+              - image: "!*:latest"

@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: anthra-quota
+  namespace: anthra
+spec:
+  hard:
+    requests.cpu: "2"
+    limits.cpu: "8"
+    requests.memory: "2Gi"
+    limits.memory: "8Gi"
+    pods: "20"
+    count/deployments.apps: "10"
+    persistentvolumeclaims: "5"
+    requests.storage: "50Gi"
+    secrets: "20"
+    configmaps: "20"
+    services: "10"
+    services.nodeports: "0"
+    services.loadbalancers: "2"

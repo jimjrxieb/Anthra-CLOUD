@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: anthra-api
+  namespace: anthra
+  labels:
+    app: anthra-api
+    owner: anthra-team
+    cost-center: anthra-saas
+    data-classification: confidential
+  annotations:
+    logging.ghostprotocol.io/audit-enabled: "true"
+spec:
+  type: ClusterIP
+  selector:
+    app: anthra-api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

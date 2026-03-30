@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: anthra-log-ingest
+  namespace: anthra
+  labels:
+    app: anthra-log-ingest
+    owner: anthra-team
+    cost-center: anthra-saas
+    data-classification: confidential
+  annotations:
+    logging.ghostprotocol.io/audit-enabled: "true"
+spec:
+  type: ClusterIP
+  selector:
+    app: anthra-log-ingest
+  ports:
+    - name: http
+      port: 9090
+      targetPort: 9090

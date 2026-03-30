@@ -1,0 +1,109 @@
+# ============================================================================
+# OPA GATEKEEPER CONSTRAINTS — Anthra-CLOUD (FedRAMP Moderate)
+# ============================================================================
+# Constraint instances scoped to the anthra namespace.
+# System namespaces and ArgoCD are excluded to prevent sync loops.
+#
+# CRITICAL: ArgoCD namespace is excluded from all constraints.
+# Gatekeeper mutations on ArgoCD-managed resources cause infinite sync loops.
+# Fix misconfigs in git, not via admission. See argocd-rules.md.
+#
+# Deploy AFTER constraint-templates.yaml CRDs are registered.
+# Enforcement: deny (deploy-policies.sh converts to dryrun in audit mode)
+# ============================================================================
+
+---
+# Constraint: Require Non-Root Containers
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequireNonRoot
+metadata:
+  name: anthra-require-non-root
+  annotations:
+    nist-800-53: "AC-6(10)"
+    fedramp: "moderate"
+spec:
+  enforcementAction: deny
+  match:
+    kinds:
+      - apiGroups: ["apps"]
+        kinds: ["Deployment", "StatefulSet", "DaemonSet"]
+    namespaces:
+      - anthra
+    excludedNamespaces:
+      - kube-system
+      - kube-public
+      - kube-node-lease
+      - gatekeeper-system
+      - argocd
+
+---
+# Constraint: Block Privileged Containers
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sBlockPrivileged
+metadata:
+  name: anthra-block-privileged
+  annotations:
+    nist-800-53: "AC-6"
+    fedramp: "moderate"
+spec:
+  enforcementAction: deny
+  match:
+    kinds:
+      - apiGroups: ["apps"]
+        kinds: ["Deployment", "StatefulSet", "DaemonSet"]
+    namespaces:
+      - anthra
+    excludedNamespaces:
+      - kube-system
+      - kube-public
+      - kube-node-lease
+      - gatekeeper-system
+      - argocd
+
+---
+# Constraint: Require Resource Limits
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequireResourceLimits
+metadata:
+  name: anthra-require-resource-limits
+  annotations:
+    nist-800-53: "SC-5"
+    fedramp: "moderate"
+spec:
+  enforcementAction: deny
+  match:
+    kinds:
+      - apiGroups: ["apps"]
+        kinds: ["Deployment", "StatefulSet", "DaemonSet"]
+    namespaces:
+      - anthra
+    excludedNamespaces:
+      - kube-system
+      - kube-public
+      - kube-node-lease
+      - gatekeeper-system
+      - argocd
+
+---
+# Constraint: Require Read-Only Root Filesystem
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequireReadOnlyRootFS
+metadata:
+  name: anthra-require-readonly-rootfs
+  annotations:
+    nist-800-53: "SI-7"
+    fedramp: "moderate"
+spec:
+  enforcementAction: deny
+  match:
+    kinds:
+      - apiGroups: ["apps"]
+        kinds: ["Deployment", "StatefulSet", "DaemonSet"]
+    namespaces:
+      - anthra
+    excludedNamespaces:
+      - kube-system
+      - kube-public
+      - kube-node-lease
+      - gatekeeper-system
+      - argocd

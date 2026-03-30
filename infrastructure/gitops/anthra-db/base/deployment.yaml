@@ -1,0 +1,120 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: anthra-db
+  namespace: anthra
+  labels:
+    app: anthra-db
+    owner: anthra-team
+    cost-center: anthra-saas
+    data-classification: confidential
+  annotations:
+    logging.ghostprotocol.io/audit-enabled: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: anthra-db
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: anthra-db
+    spec:
+      serviceAccountName: anthra-db
+      automountServiceAccountToken: false
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
+
+      containers:
+        - name: postgres
+          image: postgres:15.6-alpine
+          imagePullPolicy: Always
+
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 70
+            runAsGroup: 70
+            allowPrivilegeEscalation: false
+            privileged: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+
+          ports:
+            - containerPort: 5432
+              name: tcp-postgres
+
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: anthra-db-credentials
+                  key: username
+            - name: POSTGRES_PASSWORD_FILE
+              value: /etc/secrets/db/password
+
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
+
+          livenessProbe:
+            tcpSocket:
+              port: 5432
+            initialDelaySeconds: 30
+            periodSeconds: 20
+
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - $(POSTGRES_USER)
+                - -d
+                - $(POSTGRES_DB)
+            initialDelaySeconds: 10
+            periodSeconds: 10
+
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: tmp
+              mountPath: /tmp
+            - name: run
+              mountPath: /var/run/postgresql
+            - name: db-credentials
+              mountPath: /etc/secrets/db
+              readOnly: true
+
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        - name: run
+          emptyDir: {}
+        - name: db-credentials
+          secret:
+            secretName: anthra-db-credentials
+            defaultMode: 0400
+            items:
+              - key: password
+                path: password

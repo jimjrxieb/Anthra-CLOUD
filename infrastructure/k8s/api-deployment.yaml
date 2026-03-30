@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: anthra-api
+  namespace: anthra
+  labels:
+    app: anthra-api
+    component: api
+    version: v1.42.0
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: anthra-api
+  template:
+    metadata:
+      labels:
+        app: anthra-api
+        component: api
+    spec:
+      serviceAccountName: anthra-api
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: anthra/api:v1.42.0
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: DB_HOST
+              value: anthra-db
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_NAME
+              value: anthra
+            - name: DB_USER_FILE
+              value: /var/run/secrets/db/username
+            - name: DB_PASSWORD_FILE
+              value: /var/run/secrets/db/password
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            privileged: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: db-credentials
+              mountPath: /var/run/secrets/db
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: db-credentials
+          secret:
+            secretName: anthra-db-credentials

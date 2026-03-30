@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: anthra-log-ingest
+  namespace: anthra
+  labels:
+    app: anthra-log-ingest
+    component: ingest
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: anthra-log-ingest
+  template:
+    metadata:
+      labels:
+        app: anthra-log-ingest
+        component: ingest
+    spec:
+      serviceAccountName: anthra-log-ingest
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10003
+        runAsGroup: 10003
+        fsGroup: 10003
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: log-ingest
+          image: anthra/log-ingest:v1.0.0
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 9090
+              name: http
+          env:
+            - name: DB_HOST
+              value: anthra-db
+            - name: DB_PASSWORD_FILE
+              value: /var/run/secrets/db/password
+          securityContext:
+            allowPrivilegeEscalation: false
+            privileged: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: db-credentials
+              mountPath: /var/run/secrets/db
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: db-credentials
+          secret:
+            secretName: anthra-db-credentials

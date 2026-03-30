@@ -1,0 +1,65 @@
+# Anthra Cloud Services — ClusterIP only, exposed via ALB Ingress
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: anthra-api
+  namespace: anthra
+  labels:
+    app: anthra-api
+spec:
+  type: ClusterIP
+  selector:
+    app: anthra-api
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: anthra-ui
+  namespace: anthra
+  labels:
+    app: anthra-ui
+spec:
+  type: ClusterIP
+  selector:
+    app: anthra-ui
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: anthra-log-ingest
+  namespace: anthra
+  labels:
+    app: anthra-log-ingest
+spec:
+  type: ClusterIP
+  selector:
+    app: anthra-log-ingest
+  ports:
+    - port: 9090
+      targetPort: 9090
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: anthra-db
+  namespace: anthra
+  labels:
+    app: anthra-db
+spec:
+  type: ClusterIP
+  selector:
+    app: anthra-db
+  ports:
+    - port: 5432
+      targetPort: 5432
+      protocol: TCP
