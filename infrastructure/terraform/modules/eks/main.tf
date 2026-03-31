@@ -1,10 +1,12 @@
 # EKS Module — Private API, Managed Node Group, IRSA
 # Controls: AC-2 (Account Management), AC-6 (Least Privilege), CM-2 (Baseline Config)
 
+data "aws_caller_identity" "current" {}
+
 # --- EKS Cluster ---
 
 resource "aws_eks_cluster" "main" {
-  name     = "${var.project_name}-eks"
+  name     = "${var.project_name}-${var.environment}-eks"
   role_arn = aws_iam_role.cluster.arn
   version  = var.eks_version
 
@@ -30,21 +32,32 @@ resource "aws_eks_cluster" "main" {
     aws_iam_role_policy_attachment.cluster_vpc,
   ]
 
-  tags = { Name = "${var.project_name}-eks" }
+  tags = { Name = "${var.project_name}-${var.environment}-eks" }
 }
 
 # --- KMS for EKS Secrets Encryption (SC-28) ---
 
 resource "aws_kms_key" "eks" {
-  description             = "EKS secrets encryption for ${var.project_name}"
+  description             = "EKS secrets encryption for ${var.project_name}-${var.environment}"
   deletion_window_in_days = 7
   enable_key_rotation     = true
 
-  tags = { Name = "${var.project_name}-eks-kms" }
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "EnableRootAccount"
+      Effect    = "Allow"
+      Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
+      Action    = "kms:*"
+      Resource  = "*"
+    }]
+  })
+
+  tags = { Name = "${var.project_name}-${var.environment}-eks-kms" }
 }
 
 resource "aws_kms_alias" "eks" {
-  name          = "alias/${var.project_name}-eks"
+  name          = "alias/${var.project_name}-${var.environment}-eks"
   target_key_id = aws_kms_key.eks.key_id
 }
 
@@ -52,7 +65,7 @@ resource "aws_kms_alias" "eks" {
 
 resource "aws_eks_node_group" "main" {
   cluster_name    = aws_eks_cluster.main.name
-  node_group_name = "${var.project_name}-workers"
+  node_group_name = "${var.project_name}-${var.environment}-workers"
   node_role_arn   = aws_iam_role.node.arn
   subnet_ids      = var.private_subnets
   instance_types  = [var.node_instance]
@@ -79,28 +92,29 @@ resource "aws_eks_node_group" "main" {
     aws_iam_role_policy_attachment.node_ecr,
   ]
 
-  tags = { Name = "${var.project_name}-workers" }
+  tags = { Name = "${var.project_name}-${var.environment}-workers" }
 }
 
 # --- Security Group (cluster) ---
 
 resource "aws_security_group" "cluster" {
-  name_prefix = "${var.project_name}-eks-cluster-"
+  name_prefix = "${var.project_name}-${var.environment}-eks-cluster-"
   description = "EKS cluster security group"
   vpc_id      = var.vpc_id
 
-  tags = { Name = "${var.project_name}-eks-cluster-sg" }
+  tags = { Name = "${var.project_name}-${var.environment}-eks-cluster-sg" }
 
   lifecycle { create_before_destroy = true }
 }
 
 resource "aws_security_group_rule" "cluster_egress" {
   type              = "egress"
-  from_port         = 0
-  to_port           = 0
-  protocol          = "-1"
-  cidr_blocks       = ["0.0.0.0/0"]
+  from_port         = 443
+  to_port           = 443
+  protocol          = "tcp"
+  cidr_blocks       = [var.vpc_cidr]
   security_group_id = aws_security_group.cluster.id
+  description       = "EKS cluster HTTPS egress to VPC"
 }
 
 # --- IAM: Cluster Role ---
@@ -169,5 +183,5 @@ resource "aws_iam_openid_connect_provider" "eks" {
   thumbprint_list = [data.tls_certificate.eks.certificates[0].sha1_fingerprint]
   url             = aws_eks_cluster.main.identity[0].oidc[0].issuer
 
-  tags = { Name = "${var.project_name}-eks-oidc" }
+  tags = { Name = "${var.project_name}-${var.environment}-eks-oidc" }
 }

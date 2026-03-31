@@ -7,7 +7,7 @@ resource "aws_sns_topic" "alerts" {
   name              = "${var.project_name}-${var.environment}-security-alerts"
   kms_master_key_id = "alias/aws/sns"
 
-  tags = { Name = "${var.project_name}-security-alerts" }
+  tags = { Name = "${var.project_name}-${var.environment}-security-alerts" }
 }
 
 resource "aws_sns_topic_subscription" "email" {
@@ -16,13 +16,47 @@ resource "aws_sns_topic_subscription" "email" {
   endpoint  = var.alert_email
 }
 
+# --- KMS for CloudWatch Log Encryption (CKV_AWS_158) ---
+
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+resource "aws_kms_key" "cloudwatch" {
+  description             = "CloudWatch log group encryption for ${var.project_name}-${var.environment}"
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "EnableRootAccount"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        Sid       = "AllowCloudWatchLogs"
+        Effect    = "Allow"
+        Principal = { Service = "logs.${data.aws_region.current.name}.amazonaws.com" }
+        Action    = ["kms:Encrypt*", "kms:Decrypt*", "kms:ReEncrypt*", "kms:GenerateDataKey*", "kms:Describe*"]
+        Resource  = "*"
+      }
+    ]
+  })
+
+  tags = { Name = "${var.project_name}-${var.environment}-cloudwatch-kms" }
+}
+
 # --- EKS Log Group ---
 
 resource "aws_cloudwatch_log_group" "eks" {
   name              = "/aws/eks/${var.eks_cluster_name}/cluster"
   retention_in_days = 365
+  kms_key_id        = aws_kms_key.cloudwatch.arn
 
-  tags = { Name = "${var.project_name}-eks-logs" }
+  tags = { Name = "${var.project_name}-${var.environment}-eks-logs" }
 }
 
 # --- Application Log Group ---
@@ -30,15 +64,16 @@ resource "aws_cloudwatch_log_group" "eks" {
 resource "aws_cloudwatch_log_group" "application" {
   name              = "/anthra/${var.environment}/application"
   retention_in_days = 365
+  kms_key_id        = aws_kms_key.cloudwatch.arn
 
-  tags = { Name = "${var.project_name}-app-logs" }
+  tags = { Name = "${var.project_name}-${var.environment}-app-logs" }
 }
 
 # --- Security Alarms ---
 
 # High CPU on EKS nodes (SI-4)
 resource "aws_cloudwatch_metric_alarm" "eks_cpu_high" {
-  alarm_name          = "${var.project_name}-eks-cpu-high"
+  alarm_name          = "${var.project_name}-${var.environment}-eks-cpu-high"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 3
   metric_name         = "node_cpu_utilization"
@@ -56,7 +91,7 @@ resource "aws_cloudwatch_metric_alarm" "eks_cpu_high" {
 
 # RDS High CPU
 resource "aws_cloudwatch_metric_alarm" "rds_cpu_high" {
-  alarm_name          = "${var.project_name}-rds-cpu-high"
+  alarm_name          = "${var.project_name}-${var.environment}-rds-cpu-high"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 3
   metric_name         = "CPUUtilization"
@@ -74,7 +109,7 @@ resource "aws_cloudwatch_metric_alarm" "rds_cpu_high" {
 
 # RDS Low Free Storage
 resource "aws_cloudwatch_metric_alarm" "rds_storage_low" {
-  alarm_name          = "${var.project_name}-rds-storage-low"
+  alarm_name          = "${var.project_name}-${var.environment}-rds-storage-low"
   comparison_operator = "LessThanThreshold"
   evaluation_periods  = 1
   metric_name         = "FreeStorageSpace"
@@ -92,7 +127,7 @@ resource "aws_cloudwatch_metric_alarm" "rds_storage_low" {
 
 # RDS Database Connections High
 resource "aws_cloudwatch_metric_alarm" "rds_connections_high" {
-  alarm_name          = "${var.project_name}-rds-connections-high"
+  alarm_name          = "${var.project_name}-${var.environment}-rds-connections-high"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 2
   metric_name         = "DatabaseConnections"
@@ -110,7 +145,7 @@ resource "aws_cloudwatch_metric_alarm" "rds_connections_high" {
 
 # Unauthorized API Calls (SI-4, AU-6)
 resource "aws_cloudwatch_metric_alarm" "unauthorized_api" {
-  alarm_name          = "${var.project_name}-unauthorized-api-calls"
+  alarm_name          = "${var.project_name}-${var.environment}-unauthorized-api-calls"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 1
   metric_name         = "UnauthorizedAttemptCount"
@@ -125,7 +160,7 @@ resource "aws_cloudwatch_metric_alarm" "unauthorized_api" {
 
 # Root Account Usage (AC-2(7))
 resource "aws_cloudwatch_log_metric_filter" "root_usage" {
-  name           = "${var.project_name}-root-account-usage"
+  name           = "${var.project_name}-${var.environment}-root-account-usage"
   pattern        = "{ $.userIdentity.type = \"Root\" && $.userIdentity.invokedBy NOT EXISTS && $.eventType != \"AwsServiceEvent\" }"
   log_group_name = aws_cloudwatch_log_group.cloudtrail.name
 
@@ -137,7 +172,7 @@ resource "aws_cloudwatch_log_metric_filter" "root_usage" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "root_usage" {
-  alarm_name          = "${var.project_name}-root-account-usage"
+  alarm_name          = "${var.project_name}-${var.environment}-root-account-usage"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 1
   metric_name         = "RootAccountUsage"
@@ -152,7 +187,7 @@ resource "aws_cloudwatch_metric_alarm" "root_usage" {
 
 # Console Sign-in Failures (AC-7)
 resource "aws_cloudwatch_log_metric_filter" "signin_failures" {
-  name           = "${var.project_name}-console-signin-failures"
+  name           = "${var.project_name}-${var.environment}-console-signin-failures"
   pattern        = "{ $.eventName = \"ConsoleLogin\" && $.errorMessage = \"Failed authentication\" }"
   log_group_name = aws_cloudwatch_log_group.cloudtrail.name
 
@@ -164,7 +199,7 @@ resource "aws_cloudwatch_log_metric_filter" "signin_failures" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "signin_failures" {
-  alarm_name          = "${var.project_name}-console-signin-failures"
+  alarm_name          = "${var.project_name}-${var.environment}-console-signin-failures"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 1
   metric_name         = "ConsoleSigninFailures"
@@ -182,6 +217,7 @@ resource "aws_cloudwatch_metric_alarm" "signin_failures" {
 resource "aws_cloudwatch_log_group" "cloudtrail" {
   name              = "/aws/cloudtrail/${var.project_name}-${var.environment}"
   retention_in_days = 365
+  kms_key_id        = aws_kms_key.cloudwatch.arn
 
-  tags = { Name = "${var.project_name}-cloudtrail-logs" }
+  tags = { Name = "${var.project_name}-${var.environment}-cloudtrail-logs" }
 }

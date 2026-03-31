@@ -8,3 +8,8 @@ resources:
 replicas:
   - name: anthra-ui
     count: 2
+
+images:
+  - name: anthra/ui
+    newName: 026090554981.dkr.ecr.us-east-1.amazonaws.com/anthra-ui
+    newTag: sha-9934ecd

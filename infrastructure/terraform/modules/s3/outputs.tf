@@ -13,3 +13,7 @@ output "evidence_bucket_name" {
 output "evidence_bucket_arn" {
   value = aws_s3_bucket.evidence.arn
 }
+
+output "access_logs_bucket_id" {
+  value = aws_s3_bucket.access_logs.id
+}

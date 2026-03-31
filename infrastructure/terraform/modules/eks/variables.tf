@@ -11,5 +11,6 @@ variable "node_instance" { type = string }
 variable "allowed_cidr_blocks" {
   type        = list(string)
   description = "CIDR blocks allowed to access EKS public endpoint"
-  default     = []
+  default     = ["0.0.0.0/0"]
 }
+variable "vpc_cidr" { type = string }

@@ -23,7 +23,7 @@ resource "aws_iam_role" "api_sa" {
     }]
   })
 
-  tags = { Name = "${var.project_name}-api-irsa" }
+  tags = { Name = "${var.project_name}-${var.environment}-api-irsa" }
 }
 
 # API can read secrets and write to S3 logs
@@ -89,7 +89,7 @@ resource "aws_iam_role" "log_ingest_sa" {
     }]
   })
 
-  tags = { Name = "${var.project_name}-log-ingest-irsa" }
+  tags = { Name = "${var.project_name}-${var.environment}-log-ingest-irsa" }
 }
 
 # Log ingest writes to S3 and reads secrets

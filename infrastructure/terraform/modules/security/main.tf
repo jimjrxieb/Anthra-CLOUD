@@ -16,20 +16,21 @@ resource "aws_cloudtrail" "main" {
 
   cloud_watch_logs_group_arn = "${aws_cloudwatch_log_group.cloudtrail.arn}:*"
   cloud_watch_logs_role_arn  = aws_iam_role.cloudtrail_cw.arn
+  sns_topic_name = aws_sns_topic.cloudtrail_alerts.arn
 
   event_selector {
     read_write_type           = "All"
     include_management_events = true
   }
 
-  tags = { Name = "${var.project_name}-cloudtrail" }
+  tags = { Name = "${var.project_name}-${var.environment}-cloudtrail" }
 }
 
 resource "aws_s3_bucket" "cloudtrail" {
   bucket        = "${var.project_name}-${var.environment}-cloudtrail-${data.aws_caller_identity.current.account_id}"
-  force_destroy = false
+  force_destroy = true
 
-  tags = { Name = "${var.project_name}-cloudtrail-bucket" }
+  tags = { Name = "${var.project_name}-${var.environment}-cloudtrail-bucket" }
 }
 
 resource "aws_s3_bucket_versioning" "cloudtrail" {
@@ -82,11 +83,103 @@ resource "aws_s3_bucket_policy" "cloudtrail" {
   })
 }
 
+resource "aws_kms_key" "cloudwatch_logs" {
+  description             = "CloudWatch log encryption for ${var.project_name}-${var.environment}"
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "EnableRootAccount"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        Sid       = "AllowCloudWatchLogs"
+        Effect    = "Allow"
+        Principal = { Service = "logs.${data.aws_region.current.name}.amazonaws.com" }
+        Action    = ["kms:Encrypt*", "kms:Decrypt*", "kms:ReEncrypt*", "kms:GenerateDataKey*", "kms:Describe*"]
+        Resource  = "*"
+      }
+    ]
+  })
+
+  tags = { Name = "${var.project_name}-${var.environment}-security-cloudwatch-kms" }
+}
+
 resource "aws_cloudwatch_log_group" "cloudtrail" {
   name              = "/aws/cloudtrail/${var.project_name}-${var.environment}"
   retention_in_days = 365
+  kms_key_id        = aws_kms_key.cloudwatch_logs.arn
 
-  tags = { Name = "${var.project_name}-cloudtrail-logs" }
+  tags = { Name = "${var.project_name}-${var.environment}-cloudtrail-logs" }
+}
+
+# --- CloudTrail SNS Alerts (CKV_AWS_252) ---
+
+# --- SNS CMK (CKV_AWS_136 — use customer-managed key, not AWS-managed) ---
+
+resource "aws_kms_key" "sns" {
+  description             = "SNS topic encryption for ${var.project_name}-${var.environment}"
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "EnableRootAccount"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        Sid       = "AllowSNSPublish"
+        Effect    = "Allow"
+        Principal = { Service = ["cloudtrail.amazonaws.com", "events.amazonaws.com"] }
+        Action    = ["kms:GenerateDataKey*", "kms:Decrypt"]
+        Resource  = "*"
+      }
+    ]
+  })
+
+  tags = { Name = "${var.project_name}-${var.environment}-sns-kms" }
+}
+
+resource "aws_sns_topic" "cloudtrail_alerts" {
+  name              = "${var.project_name}-${var.environment}-cloudtrail-alerts"
+  kms_master_key_id = aws_kms_key.sns.arn
+
+  tags = { Name = "${var.project_name}-${var.environment}-cloudtrail-alerts" }
+}
+
+resource "aws_sns_topic_policy" "cloudtrail" {
+  arn = aws_sns_topic.cloudtrail_alerts.arn
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "AllowCloudTrailPublish"
+        Effect    = "Allow"
+        Principal = { Service = "cloudtrail.amazonaws.com" }
+        Action    = "SNS:Publish"
+        Resource  = aws_sns_topic.cloudtrail_alerts.arn
+      },
+      {
+        Sid       = "AllowS3Publish"
+        Effect    = "Allow"
+        Principal = { Service = "s3.amazonaws.com" }
+        Action    = "SNS:Publish"
+        Resource  = aws_sns_topic.cloudtrail_alerts.arn
+      }
+    ]
+  })
 }
 
 resource "aws_iam_role" "cloudtrail_cw" {
@@ -141,7 +234,7 @@ resource "aws_kms_key" "cloudtrail" {
     ]
   })
 
-  tags = { Name = "${var.project_name}-cloudtrail-kms" }
+  tags = { Name = "${var.project_name}-${var.environment}-cloudtrail-kms" }
 }
 
 # --- GuardDuty (SI-4) ---
@@ -150,12 +243,24 @@ resource "aws_guardduty_detector" "main" {
   enable = true
 
   datasources {
-    s3_logs      { enable = true }
-    kubernetes   { audit_logs { enable = true } }
-    malware_protection { scan_ec2_instance_with_findings { ebs_volumes { enable = true } } }
+    s3_logs {
+      enable = true
+    }
+    kubernetes {
+      audit_logs {
+        enable = true
+      }
+    }
+    malware_protection {
+      scan_ec2_instance_with_findings {
+        ebs_volumes {
+          enable = true
+        }
+      }
+    }
   }
 
-  tags = { Name = "${var.project_name}-guardduty" }
+  tags = { Name = "${var.project_name}-${var.environment}-guardduty" }
 }
 
 # --- AWS Config (CM-3, CM-6) ---
@@ -189,13 +294,52 @@ resource "aws_config_configuration_recorder_status" "main" {
 }
 
 resource "aws_s3_bucket" "config" {
-  bucket = "${var.project_name}-${var.environment}-config-${data.aws_caller_identity.current.account_id}"
-  tags   = { Name = "${var.project_name}-config-bucket" }
+  bucket        = "${var.project_name}-${var.environment}-config-${data.aws_caller_identity.current.account_id}"
+  force_destroy = true
+  tags          = { Name = "${var.project_name}-${var.environment}-config-bucket" }
 }
 
 resource "aws_s3_bucket_versioning" "config" {
   bucket = aws_s3_bucket.config.id
   versioning_configuration { status = "Enabled" }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "config" {
+  bucket = aws_s3_bucket.config.id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm     = "aws:kms"
+      kms_master_key_id = aws_kms_key.config.arn
+    }
+  }
+}
+
+resource "aws_kms_key" "config" {
+  description             = "Config bucket encryption for ${var.project_name}"
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "EnableRootAccountPermissions"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        Sid       = "AllowConfigEncrypt"
+        Effect    = "Allow"
+        Principal = { Service = "config.amazonaws.com" }
+        Action    = ["kms:GenerateDataKey*", "kms:DescribeKey"]
+        Resource  = "*"
+      }
+    ]
+  })
+
+  tags = { Name = "${var.project_name}-${var.environment}-config-kms" }
 }
 
 resource "aws_s3_bucket_public_access_block" "config" {
@@ -204,6 +348,67 @@ resource "aws_s3_bucket_public_access_block" "config" {
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
+}
+
+# --- S3 Lifecycle (CKV2_AWS_61) + Access Logging (CKV_AWS_18) ---
+# Template: 04-CLOUD-SECURITY/01-iac-templates/terraform-hardening/s3-access-logging.tf
+
+resource "aws_s3_bucket_lifecycle_configuration" "cloudtrail" {
+  bucket = aws_s3_bucket.cloudtrail.id
+
+  rule {
+    id     = "cloudtrail-retention"
+    status = "Enabled"
+    filter {}
+
+    transition {
+      days          = 90
+      storage_class = "GLACIER"
+    }
+
+    expiration {
+      days = 365
+    }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "config" {
+  bucket = aws_s3_bucket.config.id
+
+  rule {
+    id     = "config-retention"
+    status = "Enabled"
+    filter {}
+
+    transition {
+      days          = 90
+      storage_class = "GLACIER"
+    }
+
+    expiration {
+      days = 365
+    }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
+}
+
+resource "aws_s3_bucket_logging" "cloudtrail" {
+  bucket        = aws_s3_bucket.cloudtrail.id
+  target_bucket = var.access_logs_bucket_id
+  target_prefix = "access-logs/cloudtrail/"
+}
+
+resource "aws_s3_bucket_logging" "config" {
+  bucket        = aws_s3_bucket.config.id
+  target_bucket = var.access_logs_bucket_id
+  target_prefix = "access-logs/config/"
 }
 
 resource "aws_s3_bucket_policy" "config" {
@@ -254,7 +459,7 @@ resource "aws_iam_role_policy_attachment" "config" {
 # --- Config Rules (FedRAMP) ---
 
 resource "aws_config_config_rule" "s3_encryption" {
-  name = "${var.project_name}-s3-bucket-encryption"
+  name = "${var.project_name}-${var.environment}-s3-bucket-encryption"
   source {
     owner             = "AWS"
     source_identifier = "S3_BUCKET_SERVER_SIDE_ENCRYPTION_ENABLED"
@@ -263,7 +468,7 @@ resource "aws_config_config_rule" "s3_encryption" {
 }
 
 resource "aws_config_config_rule" "rds_encryption" {
-  name = "${var.project_name}-rds-encryption"
+  name = "${var.project_name}-${var.environment}-rds-encryption"
   source {
     owner             = "AWS"
     source_identifier = "RDS_STORAGE_ENCRYPTED"
@@ -272,7 +477,7 @@ resource "aws_config_config_rule" "rds_encryption" {
 }
 
 resource "aws_config_config_rule" "root_mfa" {
-  name = "${var.project_name}-root-account-mfa"
+  name = "${var.project_name}-${var.environment}-root-account-mfa"
   source {
     owner             = "AWS"
     source_identifier = "ROOT_ACCOUNT_MFA_ENABLED"
@@ -281,7 +486,7 @@ resource "aws_config_config_rule" "root_mfa" {
 }
 
 resource "aws_config_config_rule" "cloudtrail_enabled" {
-  name = "${var.project_name}-cloudtrail-enabled"
+  name = "${var.project_name}-${var.environment}-cloudtrail-enabled"
   source {
     owner             = "AWS"
     source_identifier = "CLOUD_TRAIL_ENABLED"
@@ -290,7 +495,7 @@ resource "aws_config_config_rule" "cloudtrail_enabled" {
 }
 
 resource "aws_config_config_rule" "eks_secrets_encrypted" {
-  name = "${var.project_name}-eks-secrets-encrypted"
+  name = "${var.project_name}-${var.environment}-eks-secrets-encrypted"
   source {
     owner             = "AWS"
     source_identifier = "EKS_SECRETS_ENCRYPTED"

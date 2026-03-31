@@ -1,9 +1,14 @@
 # Anthra Security Platform — FedRAMP Moderate Terraform Root
 # NIST 800-53 Rev 5 controls implemented via IaC
 #
-# Usage:
+# Usage (staging first, always):
 #   cd terraform/
-#   terraform init
+#   terraform init -backend-config="key=staging/terraform.tfstate"
+#   terraform plan -var-file="environments/staging/terraform.tfvars"
+#   terraform apply -var-file="environments/staging/terraform.tfvars"
+#
+# Production (see playbook 09-prod-deploy.md):
+#   terraform init -backend-config="key=production/terraform.tfstate" -reconfigure
 #   terraform plan -var-file="environments/production/terraform.tfvars"
 #   terraform apply -var-file="environments/production/terraform.tfvars"
 
@@ -33,7 +38,7 @@ terraform {
   #     --billing-mode PAY_PER_REQUEST
   backend "s3" {
     bucket         = "anthra-fedramp-tfstate"
-    key            = "production/terraform.tfstate"
+    key            = "staging/terraform.tfstate"
     region         = "us-east-1"
     dynamodb_table = "anthra-fedramp-tflock"
     encrypt        = true
@@ -68,9 +73,10 @@ module "vpc" {
 module "security" {
   source = "./modules/security"
 
-  project_name = var.project_name
-  environment  = var.environment
-  vpc_id       = module.vpc.vpc_id
+  project_name          = var.project_name
+  environment           = var.environment
+  vpc_id                = module.vpc.vpc_id
+  access_logs_bucket_id = module.s3.access_logs_bucket_id
 }
 
 module "iam" {
@@ -98,14 +104,16 @@ module "rds" {
   database_subnets   = module.vpc.database_subnet_ids
   db_password_secret = module.secrets.db_password_arn
   eks_security_group = module.eks.node_security_group_id
+  vpc_cidr           = var.vpc_cidr
 }
 
 module "s3" {
   source = "./modules/s3"
 
-  project_name = var.project_name
-  environment  = var.environment
-  aws_region   = var.aws_region
+  project_name  = var.project_name
+  environment   = var.environment
+  aws_region    = var.aws_region
+  sns_topic_arn = module.security.sns_topic_arn
 }
 
 module "eks" {
@@ -121,6 +129,7 @@ module "eks" {
   node_max        = var.node_max
   node_desired    = var.node_desired
   node_instance   = var.node_instance_type
+  vpc_cidr        = var.vpc_cidr
 }
 
 module "cloudwatch" {
@@ -133,3 +142,13 @@ module "cloudwatch" {
   vpc_id           = module.vpc.vpc_id
   alert_email      = var.alert_email
 }
+
+# module "devops_agent" {
+#   source = "./modules/devops-agent"
+#
+#   project_name        = var.project_name
+#   environment         = var.environment
+#   agent_space_name    = "${var.project_name}-${var.environment}-agent"
+#   enable_operator_app = var.enable_devops_agent_operator_app
+# }
+# TODO: Enable after awscc provider resource schema is confirmed

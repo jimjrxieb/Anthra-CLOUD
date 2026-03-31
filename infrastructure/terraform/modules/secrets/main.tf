@@ -7,7 +7,7 @@ resource "aws_secretsmanager_secret" "db_password" {
   recovery_window_in_days = 7
   kms_key_id              = aws_kms_key.secrets.arn
 
-  tags = { Name = "${var.project_name}-db-credentials" }
+  tags = { Name = "${var.project_name}-${var.environment}-db-credentials" }
 }
 
 resource "aws_secretsmanager_secret_version" "db_password" {
@@ -33,7 +33,7 @@ resource "aws_secretsmanager_secret" "api_keys" {
   recovery_window_in_days = 7
   kms_key_id              = aws_kms_key.secrets.arn
 
-  tags = { Name = "${var.project_name}-api-keys" }
+  tags = { Name = "${var.project_name}-${var.environment}-api-keys" }
 }
 
 resource "aws_secretsmanager_secret_version" "api_keys" {
@@ -56,12 +56,25 @@ resource "random_password" "api_key" {
 
 # --- KMS for Secrets Manager ---
 
+data "aws_caller_identity" "current" {}
+
 resource "aws_kms_key" "secrets" {
-  description             = "Secrets Manager encryption for ${var.project_name}"
+  description             = "Secrets Manager encryption for ${var.project_name}-${var.environment}"
   deletion_window_in_days = 7
   enable_key_rotation     = true
 
-  tags = { Name = "${var.project_name}-secrets-kms" }
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "EnableRootAccount"
+      Effect    = "Allow"
+      Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
+      Action    = "kms:*"
+      Resource  = "*"
+    }]
+  })
+
+  tags = { Name = "${var.project_name}-${var.environment}-secrets-kms" }
 }
 
 # --- Automatic Rotation (IA-5(1)) ---
@@ -82,6 +95,8 @@ resource "aws_lambda_function" "rotate_secret" {
   handler       = "index.handler"
   runtime       = "python3.12"
   timeout       = 30
+  reserved_concurrent_executions = 5
+  kms_key_arn                    = aws_kms_key.secrets.arn
 
   # Placeholder zip — replace with actual rotation code
   filename = "${path.module}/rotate_placeholder.zip"
@@ -90,13 +105,24 @@ resource "aws_lambda_function" "rotate_secret" {
     mode = "Active"
   }
 
+  dead_letter_config {
+    target_arn = aws_sqs_queue.lambda_dlq.arn
+  }
+
   environment {
     variables = {
       SECRET_ARN = aws_secretsmanager_secret.db_password.arn
     }
   }
 
-  tags = { Name = "${var.project_name}-secret-rotation" }
+  tags = { Name = "${var.project_name}-${var.environment}-secret-rotation" }
+}
+
+resource "aws_sqs_queue" "lambda_dlq" {
+  name              = "${var.project_name}-${var.environment}-rotation-dlq"
+  kms_master_key_id = aws_kms_key.secrets.arn
+
+  tags = { Name = "${var.project_name}-${var.environment}-rotation-dlq" }
 }
 
 resource "aws_iam_role" "rotation_lambda" {
@@ -133,6 +159,11 @@ resource "aws_iam_role_policy" "rotation_lambda" {
         Action   = ["kms:Decrypt", "kms:GenerateDataKey"]
         Effect   = "Allow"
         Resource = aws_kms_key.secrets.arn
+      },
+      {
+        Action   = "sqs:SendMessage"
+        Effect   = "Allow"
+        Resource = aws_sqs_queue.lambda_dlq.arn
       }
     ]
   })
