@@ -63,6 +63,8 @@ spec:
                   key: username
             - name: POSTGRES_PASSWORD_FILE
               value: /etc/secrets/db/password
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
 
           resources:
             requests:
@@ -88,10 +90,6 @@ spec:
                 - $(POSTGRES_DB)
             initialDelaySeconds: 10
             periodSeconds: 10
-
-          env:
-            - name: PGDATA
-              value: /var/lib/postgresql/data/pgdata
 
           volumeMounts:
             - name: data
