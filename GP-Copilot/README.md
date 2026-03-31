@@ -1,340 +1,292 @@
-# JSA-DevSec Scan Results Summary
+# GP-Copilot — Anthra-CLOUD Engagement
 
-**Date:** February 12, 2026
-**Target:** Anthra Security Platform (Pre-FedRAMP Engagement)
-**Scanner:** JSA-DevSec v1.0 (Agent ID: jsa-a3688776)
-**Operator:** Claude Sonnet 4.5 (B-rank)
+GP-Copilot engagement artifacts for the Anthra Cloud platform. Everything an engineer needs to understand what was done, what was found, and what to do next.
 
----
-
-## What Was Done
-
-JSA-DevSec performed a comprehensive pre-deployment security scan of the Anthra-FedRAMP application and generated:
-
-1. **41 Security Findings** (all JSON format)
-2. **1 Comprehensive Scan Report** (markdown)
-3. **3 Remediation Templates** (YAML + Python)
-4. **2 OPA/Kyverno Policies** (admission control)
-5. **1 FedRAMP SSP Appendix** (compliance documentation)
-
----
-
-## Directory Structure
+## Directory Map
 
 ```
-Anthra-FedRAMP/GP-Copilot/
-├── jsa-devsec/                         # JSA-DevSec scan results (336 KB)
-│   ├── README.md                       # Overview and usage guide
-│   ├── findings/                       # 41 JSON files (one per finding)
-│   │   ├── 1762294.json               # Gitleaks: Hardcoded API key
-│   │   ├── 7779977.json               # Bandit: MD5 hash usage
-│   │   ├── 7557622.json               # Semgrep: Missing runAsNonRoot
-│   │   └── ... (38 more)
-│   ├── reports/
-│   │   └── SCAN-REPORT-2026-02-12.md  # Comprehensive report
-│   ├── remediations/
-│   │   ├── 01-security-contexts.yaml  # K8s security context fixes
-│   │   ├── 02-secrets-management.yaml # Move secrets to K8s Secrets
-│   │   └── 03-md5-to-bcrypt.py        # Replace MD5 with bcrypt
-│   └── scanner-outputs/               # Raw scanner outputs (empty)
-│
-├── opa-package/                        # Admission control policies (28 KB)
-│   ├── require-security-context.yaml  # Gatekeeper: Block pods without securityContext (AC-6)
-│   ├── block-latest-tags.yaml         # Kyverno: Block :latest image tags (CM-2)
-│   ├── 03-prohibit-insecure-services.rego # Conftest: Block NodePort/LoadBalancer (SC-7)
-│   ├── 04-prohibit-host-path-mounts.yaml  # Gatekeeper: Block hostPath mounts (AC-6)
-│   └── 05-require-resource-limits.rego    # Conftest: Force resource limits (CM-2)
-│
-├── fedRAMP-package/                    # Compliance documentation (16 KB)
-│   └── SSP-APPENDIX-A-FINDINGS.md     # SSP Appendix: Pre-engagement findings
-│
-├── jsa-infrasec/                       # Runtime security (not yet deployed)
-├── summaries/                          # Executive summaries (not yet generated)
-└── SUMMARY.md                          # This file
+GP-Copilot/
+  gp-outputs/       All scan results, reports, and summaries (centralized)
+  gp-playbooks/     All engagement playbooks (centralized)
+  01-package/        01-APP-SEC — code, deps, containers, CI
+  02-package/        02-CLUSTER-HARDEN — policies, RBAC, admission, PSS
+  03-package/        03-RUNTIME-SECURITY — Falco, watchers, responders
+  04-package/        04-OPTIMIZE — cost optimization
+  07-package/        07-CLOUD-SECURITY — AWS controls, Terraform, IAM
+  jsa-variant-sums/  Session logs and cheatsheets
 ```
 
-**Total Size:** 364 KB (41 findings + reports + remediations + policies)
+## Centralized Outputs (`gp-outputs/`)
 
----
+All scan results, fix reports, and summaries in one place. Prefixed by package:
 
-## Findings Breakdown
+| Prefix | Package | What |
+|--------|---------|------|
+| `01-appsec-` | APP-SEC | Checkov, Trivy, Conftest scans, fix reports |
+| `01-summary-` | APP-SEC | Engagement summary |
+| `02-summary-` | CLUSTER-HARDEN | IaC scan report |
+| `04-summary-` | OPTIMIZE | Cost baseline |
+| `07-cloudsec-` | CLOUD-SECURITY | Terraform apply logs |
 
-### By Rank
-| Rank | Count | Auto-Fix | Description |
-|------|-------|----------|-------------|
-| **D** | 41 | ✅ 70-90% | All findings (medium risk, auto-fixable) |
-| **C** | 0 | ⚠️ 40-70% | None (no complex issues) |
-| **B** | 0 | ⚠️ 20-40% | None (no architecture issues) |
-| **S** | 0 | ❌ 0-5% | None (no strategic issues) |
+## Centralized Playbooks (`gp-playbooks/`)
 
-**Result:** ✅ **All findings can be auto-remediated by JSA-DevSec**
+Engagement playbooks tailored to Anthra. Follow in order within each package:
 
-### By Scanner
-| Scanner | Findings | Description |
-|---------|----------|-------------|
-| **Gitleaks** | 6 | Hardcoded credentials in git |
-| **Bandit** | 3 | MD5 usage, insecure temp files (Python) |
-| **Semgrep** | 13 | CORS, MD5, missing security contexts, no TLS |
-| **Trivy** | 19 | CVEs, Dockerfile issues, K8s misconfigurations |
-| **Hadolint** | 0 | No Dockerfile linting issues |
+### 01 — App Security
+| Playbook | Purpose |
+|----------|---------|
+| `01-appsec-01-baseline-scan.md` | Initial security scan |
+| `01-appsec-02-remediation-plan.md` | Prioritize findings |
+| `01-appsec-03-apply-fixes.md` | Apply D/E rank fixes |
+| `01-appsec-04-post-fix-scan.md` | Verify fixes |
+| `01-appsec-05-cicd-gate.md` | Wire into CI/CD |
 
-### By NIST 800-53 Control
-| Control | Findings | Title | Remediation |
-|---------|----------|-------|-------------|
-| **AC-6** | 10 | Least Privilege | Add securityContext |
-| **IA-5** | 9 | Authenticator Management | Bcrypt + K8s Secrets |
-| **SC-8** | 7 | Transmission Confidentiality | TLS everywhere |
-| **CM-2** | 14 | Baseline Configuration | Resource limits, seccomp |
-| **SI-2** | 2 | Flaw Remediation | Update python-multipart |
+### 02 — Cluster Hardening
+| Playbook | Purpose |
+|----------|---------|
+| `02-cluster-01-cluster-audit.md` | Kubescape/CIS audit |
+| `02-cluster-02-apply-hardening.md` | Apply hardening |
+| `02-cluster-03-admission-control.md` | Kyverno/Gatekeeper |
+| `02-cluster-04-golden-path.md` | Golden path templates |
+| `02-cluster-05-gitops-promotion.md` | GitOps workflow |
 
----
+### 03 — Runtime Security
+| Playbook | Purpose |
+|----------|---------|
+| `03-runtime-01-deploy-falco.md` | Deploy Falco |
+| `03-runtime-02-run-watchers.md` | Event watchers |
+| `03-runtime-03-tune-falco.md` | Reduce noise |
+| `03-runtime-04-test-responders.md` | Test auto-response |
+| `03-runtime-05-operations.md` | Day-2 ops |
 
-## Key Findings
+### 07 — Cloud Security
+| Playbook | Purpose |
+|----------|---------|
+| `07-cloudsec-01-gap-analysis.md` | Identify gaps |
+| `07-cloudsec-02-scan-and-map.md` | Scan and map controls |
+| `07-cloudsec-03-remediate-controls.md` | Fix AWS findings |
 
-### Critical Issues (HIGH Severity)
+## Package Directories
 
-1. **MD5 Password Hashing** (5 findings)
-   - CWE-916: Use of weak cryptographic algorithm
-   - Risk: Passwords can be brute-forced
-   - Fix: Replace with bcrypt (see `remediations/03-md5-to-bcrypt.py`)
+Each `0*-package/` directory contains the detailed artifacts for that engagement phase:
 
-2. **Hardcoded Secrets in Git** (6 findings)
-   - CWE-798: Hard-coded credentials
-   - Risk: Credentials visible to anyone with repo access
-   - Fix: Move to K8s Secrets (see `remediations/02-secrets-management.yaml`)
-   - **POA&M:** Rotate all exposed credentials (git history contaminated)
+| Directory | Contents |
+|-----------|----------|
+| `outputs/` | Raw scan outputs (original location) |
+| `playbooks/` | Engagement playbooks (original location) |
+| `summaries/` | Executive summaries |
+| `cost-savings/` | ROI calculations |
+| `golden-techdoc/` | Technical documentation templates |
 
-3. **Containers Run as Root** (10 findings)
-   - CWE-250: Execution with unnecessary privileges
-   - Risk: Privilege escalation if compromised
-   - Fix: Add securityContext (see `remediations/01-security-contexts.yaml`)
+`gp-outputs/` and `gp-playbooks/` are the centralized copies — one place to find everything.
 
-### Medium Issues
+## Engagement Order
 
-4. **Missing Resource Limits** (4 findings)
-   - Risk: Resource exhaustion, denial of service
-   - Fix: Add requests/limits (see `remediations/01-security-contexts.yaml`)
-
-5. **No TLS on Go Service** (1 finding)
-   - CWE-319: Cleartext transmission
-   - Risk: Data exposed in transit
-   - Fix: Use `http.ListenAndServeTLS`
-
-6. **CVEs in Dependencies** (2 findings)
-   - CVE-2024-24762, CVE-2024-53981 (python-multipart)
-   - Risk: Denial of service
-   - Fix: Update to python-multipart >= 0.0.7
-
----
-
-## Remediation Strategy
-
-### Phase 1: Automated Fixes ✅ (10 minutes)
-
-Run JSA-DevSec in fix mode:
-
-```bash
-cd /home/jimmie/linkops-industries/GP-copilot/GP-BEDROCK-AGENTS/jsa-devsec
-
-python3 src/main.py fix \
-  --target /home/jimmie/linkops-industries/GP-copilot/GP-PROJECTS/01-instance/slot-3/Anthra-FedRAMP \
-  --auto-fix \
-  --auto-push
+```
+01-APP-SEC          Scan code, deps, containers, CI
+  ↓
+02-CLUSTER-HARDEN   Harden cluster, policies, RBAC, admission
+  ↓
+03-RUNTIME-SECURITY Deploy Falco, watchers, responders
+  ↓
+04-OPTIMIZE         Cost optimization, right-sizing
+  ↓
+07-CLOUD-SECURITY   AWS controls, Terraform hardening
 ```
 
-**What gets fixed:**
-- ✅ Security contexts (runAsNonRoot, drop capabilities)
-- ✅ MD5 → bcrypt
-- ✅ Secrets → K8s Secrets
-- ✅ Resource limits
-- ✅ Image tags pinned (:latest → :1.0.0)
-- ✅ Dependencies updated
-- ✅ TLS enabled
-- ✅ CORS restricted
+## Infrastructure Playbooks
 
-**Expected Result:** 41/41 findings remediated
+The deployment playbooks (how to deploy the actual infrastructure) are in a separate location:
 
-### Phase 2: Manual Follow-Up ⚠️ (2-4 hours)
-
-Some actions require human coordination:
-
-1. **POA&M #1:** Rotate all exposed credentials
-   - DB password: `anthra_default_pass_123`
-   - All hardcoded API keys in git history
-   - Even after code fix, they remain in commit history
-
-2. **POA&M #2:** Procure TLS certificates
-   - AWS ACM or Let's Encrypt
-   - Update Ingress with TLS config
-
-3. **POA&M #3:** Refactor for readOnlyRootFilesystem
-   - App currently writes to `/tmp`
-   - Use emptyDir volume mount instead
-
-### Phase 3: Policy Enforcement ⚠️ (1 day)
-
-Deploy admission policies to **prevent** these issues:
-
-```bash
-kubectl apply -f GP-Copilot/opa-package/require-security-context.yaml
-kubectl apply -f GP-Copilot/opa-package/block-latest-tags.yaml
+```
+infrastructure/playbook/    ← terraform, argocd, kubectl, VPC endpoints
 ```
 
-**Result:** Future deployments without security contexts will be **blocked**
+See [infrastructure/playbook/README.md](../infrastructure/playbook/README.md).
 
 ---
 
-## FedRAMP Readiness
+## AWS Infrastructure Evidence — Staging (2026-03-30)
 
-### Before This Scan
-- **NIST 800-53 Compliance:** 0%
-- **Security Posture:** Typical startup (velocity over security)
-- **FedRAMP Ready:** ❌ No
+Deployed via Terraform (`infrastructure/terraform/`), managed by ArgoCD. All evidence collected via AWS CLI.
 
-### After Automated Remediation
-- **NIST 800-53 Compliance:** ~60% (automated fixes)
-- **Security Posture:** Hardened for FedRAMP Moderate baseline
-- **FedRAMP Ready:** ⚠️ Partial (3 POA&M items remain)
+### 1. EKS Cluster Overview
 
-### After Ghost Protocol Engagement (Target)
-- **NIST 800-53 Compliance:** 95%+ (all 323 controls)
-- **Security Posture:** FedRAMP Moderate compliant
-- **FedRAMP Ready:** ✅ Yes (ATO-ready)
-
----
-
-## Documentation Generated
-
-### For Developers
-
-1. **`jsa-devsec/README.md`**
-   - Overview of findings
-   - How to read findings
-   - Remediation instructions
-
-2. **`jsa-devsec/reports/SCAN-REPORT-2026-02-12.md`**
-   - Comprehensive technical report
-   - Findings by scanner, severity, category
-   - NIST control mapping
-   - Remediation timeline
-
-3. **`jsa-devsec/remediations/`**
-   - Ready-to-apply YAML files
-   - Python code for bcrypt migration
-   - Step-by-step remediation guides
-
-### For Security/Compliance Teams
-
-4. **`fedRAMP-package/SSP-APPENDIX-A-FINDINGS.md`**
-   - SSP Appendix format (for 3PAO assessors)
-   - NIST 800-53 control mapping
-   - POA&M items
-   - Evidence for CA-2, CA-7, RA-5, SI-2
-
-### For Prevention (Shift-Left)
-
-5. **`opa-package/require-security-context.yaml`**
-   - OPA Gatekeeper ConstraintTemplate
-   - Blocks pods without securityContext
-
-6. **`opa-package/block-latest-tags.yaml`**
-   - Kyverno ClusterPolicy
-   - Blocks :latest image tags
-
----
-
-## Next Steps
-
-### Immediate Actions
-
-1. ✅ **Review this summary** - Understand findings
-2. ✅ **Review scan report** - See `jsa-devsec/reports/SCAN-REPORT-2026-02-12.md`
-3. ⏭️ **Run auto-fix** - Execute `jsa-devsec fix` command
-4. ⏭️ **Rotate credentials** - POA&M #1 (manual)
-5. ⏭️ **Deploy policies** - Apply OPA/Kyverno policies
-
-### Ghost Protocol Engagement
-
-6. ⏭️ **Deploy JSA-InfraSec** - Runtime security (Falco, NetworkPolicy)
-7. ⏭️ **Deploy JSA-SecOps** - Compliance monitoring
-8. ⏭️ **Generate SSP/POA&M/SAR** - Full compliance documentation
-9. ⏭️ **Evidence collection** - Automated proof of compliance
-10. ⏭️ **3PAO readiness** - Final audit preparation
-
----
-
-## For Screenshot/Demo Purposes
-
-This structure is perfect for before/after screenshots showing Ghost Protocol's value:
-
-### BEFORE (Current State)
 ```yaml
-# infrastructure/api-deployment.yaml
-containers:
-  - name: api
-    image: anthra/api:latest  # ❌ Mutable tag
-    env:
-      - name: DB_PASSWORD
-        value: anthra_default_pass_123  # ❌ CVE-522: Exposed credential
-# ❌ No securityContext (runs as root)
-# ❌ No resource limits
-```
-
-**Findings:** 41 security issues, 0% FedRAMP compliant
-
-### AFTER (Post-JSA Remediation)
-```yaml
-# infrastructure/api-deployment.yaml
-containers:
-  - name: api
-    image: anthra/api:1.0.0  # ✅ Pinned version
-    env:
-      - name: DB_PASSWORD
-        valueFrom:
-          secretKeyRef:
-            name: anthra-db-credentials
-            key: db-password  # ✅ K8s Secret
-    securityContext:
-      runAsNonRoot: true  # ✅ Non-root user
-      runAsUser: 10001
-      allowPrivilegeEscalation: false  # ✅ No privilege escalation
-      capabilities:
-        drop: ["ALL"]  # ✅ Minimal capabilities
+Name: anthra-staging-eks
+Status: ACTIVE
+Version: '1.32'
+Platform: eks.39
+Endpoint: https://<REDACTED>.gr7.us-east-1.eks.amazonaws.com
+EncryptionConfig:
+  - provider:
+      keyArn: arn:aws:kms:us-east-1:<ACCOUNT>:key/<EKS-KMS-KEY-ID>
     resources:
-      limits:
-        memory: "512Mi"  # ✅ Resource limits
-        cpu: "500m"
+      - secrets
 ```
 
-**Findings:** 0 security issues, ~60% FedRAMP compliant
+EKS 1.32 with envelope encryption for Kubernetes secrets via KMS. 2 nodes (t3.medium), Multi-AZ across us-east-1a and us-east-1b.
 
----
+### 2. IRSA — IAM Roles for Service Accounts (OIDC Provider)
 
-## Integration with Existing FedRAMP Package
+```yaml
+Url: oidc.eks.us-east-1.amazonaws.com/id/<OIDC-ID>
+ClientIDList:
+  - sts.amazonaws.com
+Tags:
+  - Key: Compliance
+    Value: FedRAMP-Moderate
+  - Key: ManagedBy
+    Value: terraform
+  - Key: Name
+    Value: anthra-staging-eks-oidc
+```
 
-These findings **complement** the Ghost Protocol FedRAMP methodology:
+IRSA enables pod-level AWS identity — pods assume IAM roles via OIDC without long-lived credentials. Controls: AC-2 (Account Management), AC-6 (Least Privilege).
 
-| GP-CONSULTING Package | Anthra-FedRAMP Implementation |
-|----------------------|-------------------------------|
-| `07-FedRAMP-Ready/policies/gatekeeper/` | `GP-Copilot/opa-package/` |
-| `07-FedRAMP-Ready/policies/kyverno/` | `GP-Copilot/opa-package/` |
-| `07-FedRAMP-Ready/templates/ssp/` | `GP-Copilot/fedRAMP-package/` |
-| `GP-BEDROCK-AGENTS/jsa-devsec/` | Scan engine (shared) |
-| `GP-BEDROCK-AGENTS/jsa-infrasec/` | Not yet deployed (planned) |
+### 3. KMS Key — EKS Secrets Encryption at Rest
 
-**Overlap is intentional:** Shows before/after transformation for this specific client.
+```yaml
+Description: EKS secrets encryption for anthra-staging
+KeyId: <EKS-KMS-KEY-ID>
+State: Enabled
+KeyRotationEnabled: true
+```
 
----
+Customer-managed KMS key with automatic annual rotation. Encrypts all Kubernetes secrets at rest in etcd. Control: SC-28 (Protection of Information at Rest).
 
-## Contact
+### 4. GuardDuty — Threat Detection
 
-- **JSA-DevSec Agent:** jsa-a3688776
-- **Operator:** Claude Sonnet 4.5 (B-rank)
-- **Scan Date:** February 12, 2026, 11:35:11 UTC
-- **Cycle ID:** 1770914111
-- **Ghost Protocol Methodology:** `GP-CONSULTING/07-FedRAMP-Ready/`
+```yaml
+Status: ENABLED
+Features:
+  - CLOUD_TRAIL: ENABLED
+  - DNS_LOGS: ENABLED
+  - FLOW_LOGS: ENABLED
+  - S3_DATA_EVENTS: ENABLED
+  - EKS_AUDIT_LOGS: ENABLED
+  - EBS_MALWARE_PROTECTION: ENABLED
+  - RDS_LOGIN_EVENTS: ENABLED
+Tags:
+  Compliance: FedRAMP-Moderate
+```
 
----
+GuardDuty monitors CloudTrail, VPC Flow Logs, DNS, S3, EKS audit logs, EBS, and RDS login events. Control: SI-4 (System Monitoring).
 
-*This scan demonstrates Ghost Protocol's Iron Legion platform:*
-*Automated security remediation from 0% to 60% FedRAMP compliance in 10 minutes.*
+### 5. CloudTrail — Audit Logging
+
+```yaml
+IsLogging: true
+StartLoggingTime: '2026-03-31T01:44:44Z'
+LatestDeliveryAttemptSucceeded: '2026-03-31T02:49:01Z'
+S3Bucket: anthra-staging-cloudtrail-<ACCOUNT>
+KmsKeyId: arn:aws:kms:us-east-1:<ACCOUNT>:key/<TRAIL-KMS-KEY-ID>
+MultiRegion: true
+```
+
+Multi-region trail writing to encrypted S3 with CloudWatch Logs delivery. Controls: AU-2 (Event Logging), AU-3 (Content of Audit Records), AU-9 (Protection of Audit Information).
+
+### 6. Secrets Manager — No Plaintext Credentials
+
+```yaml
+Secrets:
+  - Name: anthra/staging/db-credentials
+    KmsKeyId: arn:aws:kms:us-east-1:<ACCOUNT>:key/<SECRETS-KMS-KEY-ID>
+    RotationEnabled: true
+
+  - Name: anthra/staging/api-keys
+    KmsKeyId: arn:aws:kms:us-east-1:<ACCOUNT>:key/<SECRETS-KMS-KEY-ID>
+    RotationEnabled: pending
+```
+
+All credentials stored in Secrets Manager, encrypted with customer-managed KMS keys. DB credentials have automatic 90-day rotation via Lambda. Controls: IA-5 (Authenticator Management), SC-28 (Protection at Rest).
+
+### 7. Kubernetes — Workload Status
+
+```
+NODES (2 — Multi-AZ):
+  ip-10-0-10-x.ec2.internal   Ready   v1.32.9-eks   us-east-1a
+  ip-10-0-11-x.ec2.internal   Ready   v1.32.9-eks   us-east-1b
+
+PODS (8/8 Running — anthra namespace):
+  anthra-api          2/2 Running   0 restarts
+  anthra-db           2/2 Running   0 restarts
+  anthra-log-ingest   2/2 Running   0 restarts
+  anthra-ui           2/2 Running   0 restarts
+
+KYVERNO POLICIES (7 — Audit mode):
+  anthra-disallow-latest-tag              Ready
+  anthra-disallow-privilege-escalation    Ready
+  anthra-require-drop-all-capabilities    Ready
+  anthra-require-readonly-rootfs          Ready
+  anthra-require-resource-limits          Ready
+  anthra-require-run-as-nonroot           Ready
+  anthra-require-seccomp-profile          Ready
+```
+
+All workloads deployed via ArgoCD from GitOps overlays (Kustomize). 7 Kyverno admission policies active in audit mode, mapped to NIST AC-6, CM-6, SC-5, SC-7, SI-7.
+
+### 8. Falco — Runtime Threat Detection
+
+```yaml
+Deployment: DaemonSet (1 pod per node)
+Driver: modern_ebpf (eBPF syscall monitoring)
+Namespace: falco
+Pods: 2/2 Running
+Output: JSON to stdout + webhook-ready
+Rules: 65 rules across 8 files (MITRE ATT&CK mapped)
+Coverage: crypto-mining, data-exfiltration, privilege-escalation,
+          persistence, k8s-audit, service-mesh
+```
+
+Falco monitors every syscall on every node via eBPF. No kernel module needed on EKS managed nodes. Controls: SI-4 (System Monitoring), AU-2 (Event Logging), IR-4 (Incident Handling).
+
+### 9. Karpenter — Node Auto-Provisioning
+
+```yaml
+Version: v1.4.0
+NodePool: default
+  Instance Families: m5, m6i, m7i, c5, c6i, c7i, r5, r6i
+  Sizes: medium, large, xlarge, 2xlarge
+  Capacity: spot preferred, on-demand fallback
+  Consolidation: WhenEmptyOrUnderutilized (30s)
+  Disruption Budget: 10% (5% during business hours)
+  Node Expiry: 168h (7 days)
+EC2NodeClass: default
+  AMI: AL2023@latest (EKS-optimized)
+  EBS: 50Gi gp3, encrypted, 3000 IOPS
+  IMDSv2: required (blocks SSRF credential theft)
+Status: Ready — waiting for scale-up demand
+```
+
+Karpenter replaces Cluster Autoscaler with right-sized, bin-packed nodes. Spot-first strategy saves 60-80% on interruptible workloads. Controls: CM-6 (Configuration Settings), SC-5 (DoS Protection via resource limits).
+
+### 10. Container Insights — Observability
+
+```yaml
+Namespace: amazon-cloudwatch
+FluentBit DaemonSet: 2/2 Running (1 per node)
+Log Destination: CloudWatch Logs (/aws/containerinsights/anthra-staging-eks/)
+Metrics: Container CPU, memory, network, filesystem
+Collection Interval: 60s
+```
+
+FluentBit streams container logs and metrics to CloudWatch. Enables per-pod cost attribution when combined with Karpenter cost-tracking labels. Controls: AU-2 (Event Logging), SI-4 (System Monitoring).
+
+### NIST 800-53 Control Mapping
+
+| Control | Description | Evidence |
+|---------|-------------|----------|
+| AC-2 | Account Management | IRSA OIDC, K8s RBAC ServiceAccounts |
+| AC-6 | Least Privilege | Kyverno (non-root, drop caps, no privilege escalation) |
+| AU-2 | Event Logging | CloudTrail, Falco, FluentBit Container Insights |
+| AU-3 | Audit Record Content | CloudTrail event structure, Falco JSON output |
+| AU-9 | Protection of Audit Info | S3 versioning + KMS on trail bucket |
+| CM-6 | Configuration Settings | Kyverno (resource limits, seccomp, readonly rootfs) |
+| IA-5 | Authenticator Management | Secrets Manager (KMS, rotation enabled) |
+| IR-4 | Incident Handling | Falco runtime detection (65 rules, MITRE ATT&CK) |
+| SC-5 | Denial of Service Protection | Kyverno resource limits, LimitRanges, Karpenter |
+| SC-7 | Boundary Protection | NetworkPolicies (default-deny), seccomp profiles |
+| SC-28 | Protection at Rest | KMS on EKS secrets, RDS, S3, Secrets Manager |
+| SI-4 | System Monitoring | GuardDuty (7 sources), Falco (eBPF), Container Insights |
+| SI-7 | Software Integrity | Kyverno (read-only rootfs, drop all capabilities) |
